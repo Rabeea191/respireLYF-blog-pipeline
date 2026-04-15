@@ -1,0 +1,23 @@
+{
+  "name": "respireLYF-blog-pipeline",
+  "version": "1.0.0",
+  "description": "Multi-agent blog pipeline for RespireLYF — trend scraping to Payload CMS publishing",
+  "private": true,
+  "scripts": {
+    "tier1": "ts-node-dev --respawn --transpile-only src/pipeline/tier1-orchestrator.ts",
+    "tier2": "ts-node-dev --respawn --transpile-only src/pipeline/tier2-orchestrator.ts",
+    "build": "tsc",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "axios": "^1.7.2",
+    "rss-parser": "^3.13.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.5"
+  }
+}
