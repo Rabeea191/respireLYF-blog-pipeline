@@ -1,16 +1,4 @@
 {
-  "crons": [
-    {
-      "path": "/api/pipeline/trigger",
-      "schedule": "0 6 * * 1"
-    }
-  ],
-  "functions": {
-    "src/api/cron-trigger.ts": {
-      "maxDuration": 300
-    },
-    "src/api/clickup-webhook.ts": {
-      "maxDuration": 60
-    }
-  }
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist"
 }

@@ -25,7 +25,7 @@ import {
   saveTopicCards,
   updateTopicCard,
   getPublishedSlugs,
-} from "../lib/supabase";
+} from "../lib/store";
 import { runTrendScraper } from "../agents/trend-scraper";
 import { runTrendGate } from "../evaluators/trend-gate";
 import { runTopicGenerator } from "../agents/topic-generator";
