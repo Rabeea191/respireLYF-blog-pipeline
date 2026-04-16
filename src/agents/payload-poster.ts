@@ -13,10 +13,14 @@ import path from "path";
 import { logger } from "../lib/logger";
 import type { BlogDraft, ContentBrief, AgentResult } from "../types";
 
-// ─── Payload config ────────────────────────────────────────────────────────
-const PAYLOAD_URL      = process.env.PAYLOAD_URL      ?? process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-const PAYLOAD_EMAIL    = process.env.PAYLOAD_EMAIL    ?? "admin@respirelyf.com";
-const PAYLOAD_PASSWORD = process.env.PAYLOAD_PASSWORD ?? "";
+// ─── Payload config (read lazily so dotenv has time to load) ──────────────
+function getPayloadConfig() {
+  return {
+    url:      process.env.PAYLOAD_URL      ?? process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
+    email:    process.env.PAYLOAD_EMAIL    ?? "admin@respirelyf.com",
+    password: process.env.PAYLOAD_PASSWORD ?? "",
+  };
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 interface ImageInput {
@@ -227,10 +231,11 @@ function markdownToLexical(body: string, images: ImageInput[]): object {
 
 // ─── Payload auth + post ───────────────────────────────────────────────────
 async function loginToPayload(): Promise<string> {
-  const res = await fetch(`${PAYLOAD_URL}/api/users/login`, {
+  const { url, email, password } = getPayloadConfig();
+  const res = await fetch(`${url}/api/users/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: PAYLOAD_EMAIL, password: PAYLOAD_PASSWORD }),
+    body: JSON.stringify({ email, password }),
   });
 
   if (!res.ok) {
@@ -264,6 +269,7 @@ async function createDraft(
     },
   };
 
+  const { url: PAYLOAD_URL } = getPayloadConfig();
   const res = await fetch(`${PAYLOAD_URL}/api/blog?depth=0&fallback-locale=null`, {
     method: "POST",
     headers: {
@@ -281,7 +287,7 @@ async function createDraft(
 
   return {
     id: result.doc?.id ?? result.id,
-    adminUrl: `${PAYLOAD_URL}/admin/collections/blog/${result.doc?.id}`,
+    adminUrl: `${getPayloadConfig().url}/admin/collections/blog/${result.doc?.id}`,
   };
 }
 
@@ -294,6 +300,7 @@ export async function runPayloadPoster(
   const start = Date.now();
 
   return logger.timed("payload-poster", `Posting "${brief.h1}" to Payload CMS`, async () => {
+    const { password: PAYLOAD_PASSWORD } = getPayloadConfig();
     if (!PAYLOAD_PASSWORD) {
       return {
         success: false,
