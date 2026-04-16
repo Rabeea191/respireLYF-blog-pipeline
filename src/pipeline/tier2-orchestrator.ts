@@ -15,12 +15,16 @@
  * On completion: one blog draft per approved topic is visible in Payload admin.
  */
 
+import axios                 from "axios";
 import { runSEOResearcher }  from "../agents/seo-researcher";
 import { runContentBrief }   from "../agents/content-brief";
 import { runBlogWriter }     from "../agents/blog-writer";
 import { runBlogEvaluator }  from "../evaluators/blog-gate";
 import { runPayloadPoster }  from "../agents/payload-poster";
 import { logger }            from "../lib/logger";
+import { config }            from "../lib/config";
+import * as fs               from "fs";
+import * as path             from "path";
 import type {
   TopicCard,
   SEOPackage,
@@ -196,6 +200,56 @@ async function processTopic(topic: TopicCard): Promise<Tier2Result> {
   };
 }
 
+// ─── Fetch approved topic IDs from ClickUp ───────────────────────────────
+async function getApprovedTopicsFromClickUp(): Promise<TopicCard[]> {
+  // Load local topics from store
+  const dataDir = path.join(process.cwd(), "pipeline-data");
+  const topicsFile = path.join(dataDir, "latest-topics.json");
+
+  if (!fs.existsSync(topicsFile)) {
+    throw new Error("No topics found — run `npm run tier1` first");
+  }
+
+  const allTopics: TopicCard[] = JSON.parse(fs.readFileSync(topicsFile, "utf-8"));
+  logger.info("tier2", `Loaded ${allTopics.length} topics from local store`);
+
+  const approvedTopics: TopicCard[] = [];
+  const approvedStatusLower = config.clickup.statuses.approved.toLowerCase();
+  const approvedNotesLower  = config.clickup.statuses.approvedWithNotes.toLowerCase();
+
+  for (const topic of allTopics) {
+    if (!topic.clickup_task_id) {
+      logger.warn("tier2", `Topic "${topic.title}" has no ClickUp task ID — skipping`);
+      continue;
+    }
+
+    try {
+      const { data } = await axios.get(
+        `https://api.clickup.com/api/v2/task/${topic.clickup_task_id}`,
+        {
+          headers: { Authorization: config.clickup.apiKey },
+          timeout: 10_000,
+        }
+      );
+
+      const status: string = (data?.status?.status ?? "").toLowerCase();
+      logger.info("tier2", `"${topic.title}" → ClickUp status: "${status}"`);
+
+      if (status.includes("approved") || status === approvedStatusLower || status === approvedNotesLower) {
+        approvedTopics.push({
+          ...topic,
+          approval_status: status.includes("notes") ? "approved_with_notes" : "approved",
+          human_notes: data?.description ?? topic.human_notes,
+        });
+      }
+    } catch (err: any) {
+      logger.warn("tier2", `Could not fetch ClickUp task ${topic.clickup_task_id}: ${err.message}`);
+    }
+  }
+
+  return approvedTopics;
+}
+
 // ─── Run Tier 2 for all approved topics ───────────────────────────────────
 export async function runTier2Pipeline(approvedTopics: TopicCard[]): Promise<Tier2Result[]> {
   logger.info("tier2", `Starting Tier 2 for ${approvedTopics.length} approved topics`);
@@ -226,3 +280,62 @@ export async function runTier2Pipeline(approvedTopics: TopicCard[]): Promise<Tie
 
   return results;
 }
+
+// ─── Main entry point ─────────────────────────────────────────────────────
+async function main() {
+  logger.info("tier2", "=== Tier 2 Pipeline Starting ===");
+
+  // Check for --all flag (bypass ClickUp check — run all local topics)
+  const runAll = process.argv.includes("--all");
+
+  let approvedTopics: TopicCard[];
+
+  if (runAll) {
+    logger.info("tier2", "--all flag set: treating all local topics as approved");
+    const dataDir = path.join(process.cwd(), "pipeline-data");
+    const topicsFile = path.join(dataDir, "latest-topics.json");
+    if (!fs.existsSync(topicsFile)) {
+      logger.error("tier2", "No topics found — run `npm run tier1` first");
+      process.exit(1);
+    }
+    approvedTopics = JSON.parse(fs.readFileSync(topicsFile, "utf-8"));
+  } else {
+    logger.info("tier2", "Checking ClickUp for approved topics…");
+    approvedTopics = await getApprovedTopicsFromClickUp();
+  }
+
+  if (approvedTopics.length === 0) {
+    logger.warn("tier2", "No approved topics found — approve topics in ClickUp first, then re-run");
+    logger.warn("tier2", "Tip: or run `npm run tier2 -- --all` to process all topics");
+    process.exit(0);
+  }
+
+  logger.info("tier2", `Found ${approvedTopics.length} approved topics — starting blog production`);
+  approvedTopics.forEach((t, i) => logger.info("tier2", `  ${i + 1}. "${t.title}"`));
+
+  const results = await runTier2Pipeline(approvedTopics);
+
+  const passed = results.filter((r) => r.success).length;
+  const failed = results.filter((r) => !r.success).length;
+
+  console.log("\n════════════════════════════════════════");
+  console.log(`✅  Tier 2 complete — ${passed} blogs produced, ${failed} failed`);
+  console.log("════════════════════════════════════════");
+
+  results.forEach((r) => {
+    if (r.success) {
+      console.log(`  ✅  "${r.topic_title}"`);
+      if (r.payload_draft_url) console.log(`       Payload draft: ${r.payload_draft_url}`);
+      if (r.slug) console.log(`       Slug: ${r.slug}`);
+    } else {
+      console.log(`  ❌  "${r.topic_title}" — ${r.error}`);
+    }
+  });
+
+  process.exit(failed > 0 ? 1 : 0);
+}
+
+main().catch((err) => {
+  console.error("\n❌ Tier 2 fatal error:", err.message);
+  process.exit(1);
+});
