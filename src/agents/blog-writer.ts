@@ -126,27 +126,60 @@ function checkHardFails(
 }
 
 // ─── Build the writer system prompt ───────────────────────────────────────
-function buildSystemPrompt(brief: ContentBrief, seo: SEOPackage): string {
+function buildSystemPrompt(brief: ContentBrief, _seo: SEOPackage): string {
+  const ymylRequired = brief.ymyl_section_required;
   return `You are the Blog Writer for RespireLYF — an iOS respiratory health app for US adults with asthma or COPD.
 
-You write one blog article, following the content brief exactly. You are disciplined, precise, and do not add sections not in the brief.
+You write one complete, publication-ready blog article per call. You follow the content brief exactly and NEVER skip required sections.
 
-HARD RULES (non-negotiable):
-1. Word count: TARGET 900–1,050 words. Hard minimum 800, hard maximum 1,400. Write tight — every sentence must earn its place. DO NOT add padding to hit a target.
-2. Banned words (never use): journey, empower, transform, game-changer, revolutionary, unlock
-3. FDA language: observational only — "associated with" not "causes", "research suggests" not "research proves"
-4. Primary keyword MUST appear in: (a) H1, (b) the VERY FIRST text paragraph (before any image placeholder), (c) 2+ H2s, (d) closing section
-5. Product intro at ~70% mark — 2-3 sentences, ONE feature only, never reads as an ad
-6. CTA heading: EXACTLY "Track What's Actually Affecting Your Breathing" (copy this verbatim)
-7. Three image placeholders in order: <!-- IMAGE: hero --> at top, <!-- IMAGE: inline --> mid-article, <!-- IMAGE: cta --> near end
-8. Include full image PROMPT comments for each placeholder (nano_banana_2_prompt + nano_banana_pro_prompt)
-9. "When to See a Doctor" section if brief flags ymyl_section_required: true
-10. Further Reading section at the end with the outbound links provided
-11. No citations from Healthline, Verywell Health, WebMD
-12. Do NOT open with a definition or statistic — hook with the reader's exact frustration first
-13. Include 1-3 internal links where genuinely relevant
+══════════════════════════════════════════
+REQUIRED ARTICLE STRUCTURE (every section is mandatory)
+══════════════════════════════════════════
+1. YAML frontmatter block (title, meta_title, meta_description, slug, keywords)
+2. <!-- IMAGE: hero --> placeholder + <!-- PROMPT: [vivid scene description] -->
+3. H1 (exact text from brief)
+4. OPENING PARAGRAPH — first plain text. Must contain the primary keyword. No definitions, no statistics. Hook = reader's exact frustration.
+5. H2 sections (use the outline from the brief, in order)
+6. <!-- IMAGE: inline --> placeholder + <!-- PROMPT: [description] --> (place mid-article)
+7. RespireLYF feature mention (~70% through) — 2-3 sentences, one feature only, earned not advertised
+${ymylRequired ? `8. ⚠️  MANDATORY: ## When to See a Doctor
+   This section is REQUIRED because ymyl_section_required = true.
+   Write 3-5 sentences listing specific clinical warning signs that need immediate medical attention.
+   DO NOT skip this section under any circumstances.
+9. ## Track What's Actually Affecting Your Breathing  ← CTA (exact heading)` : `8. ## Track What's Actually Affecting Your Breathing  ← CTA (exact heading)`}
+${ymylRequired ? "10" : "9"}. <!-- IMAGE: cta --> placeholder + <!-- PROMPT: [description] -->
+${ymylRequired ? "11" : "10"}. ## Further Reading (use the outbound links from the brief)
 
-OUTPUT: The complete .md file, starting with YAML frontmatter, including all sections.`;
+══════════════════════════════════════════
+HARD RULES
+══════════════════════════════════════════
+• Word count: TARGET 900–1,050 words (hard min 800, hard max 1,400). Count carefully.
+• Primary keyword in: H1 + opening paragraph + 2+ H2s + closing section
+• CTA heading EXACTLY: "Track What's Actually Affecting Your Breathing" — copy verbatim
+• Three image slots: <!-- IMAGE: hero -->, <!-- IMAGE: inline -->, <!-- IMAGE: cta -->
+• Three PROMPT comments — one after each image slot
+• Banned words — never use: journey, empower, transform, game-changer, revolutionary, unlock
+• No Healthline, WebMD, Verywell Health links
+• FDA language: "associated with" not "causes", "research suggests" not "proves"
+• Do NOT open with a definition or statistic
+
+══════════════════════════════════════════
+SELF-CHECK — run this before outputting the article
+══════════════════════════════════════════
+Before writing your final response, verify:
+□ Word count between 800-1,400 (count it)
+□ Primary keyword in opening paragraph (first plain text block)
+□ <!-- IMAGE: hero --> present
+□ <!-- IMAGE: inline --> present
+□ <!-- IMAGE: cta --> present
+□ Three <!-- PROMPT: --> blocks present
+${ymylRequired ? "□ ## When to See a Doctor section present — THIS IS MANDATORY\n" : ""}□ ## Track What's Actually Affecting Your Breathing heading present (exact text)
+□ ## Further Reading section present
+□ No banned words
+
+If any box is unchecked → fix it before outputting.
+
+OUTPUT: The complete .md article only. No commentary before or after.`;
 }
 
 // ─── Build the writer user prompt ─────────────────────────────────────────
@@ -163,7 +196,7 @@ function buildWriterPrompt(
     .map((l) => `- ${l.anchor_text} (${l.source_org}): ${l.url}`)
     .join("\n");
 
-  return `Write the full blog article using this brief.
+  return `Write the full blog article using this brief. Every section listed below is required.
 
 ━━━ CONTENT BRIEF ━━━
 H1: ${brief.h1}
@@ -173,28 +206,40 @@ Slug: ${brief.yaml_frontmatter.slug}
 Meta title: ${brief.yaml_frontmatter.meta_title}
 Meta description: ${brief.yaml_frontmatter.meta_description}
 
-Opening angle (start here): "${brief.opening_angle}"
+Opening angle (hook with this frustration in sentence 1): "${brief.opening_angle}"
 Tone note: "${brief.tone_note}"
-YMYL "When to See a Doctor" required: ${brief.ymyl_section_required}
 
-H2 Outline:
-${brief.h2_outline.map((h, i) => `${i + 1}. ${h.heading}${h.keyword_notes ? ` [keyword: ${h.keyword_notes}]` : ""}${h.missing_from_competitors ? " ← UNIQUE ANGLE (competitors don't cover this)" : ""}`).join("\n")}
+H2 Outline (write ALL of these, in order):
+${brief.h2_outline.map((h, i) => `${i + 1}. ${h.heading}${h.keyword_notes ? ` [use keyword: ${h.keyword_notes}]` : ""}${h.missing_from_competitors ? " ← UNIQUE ANGLE" : ""}`).join("\n")}
+${brief.ymyl_section_required ? `${brief.h2_outline.length + 1}. When to See a Doctor  ← ⚠️  MANDATORY YMYL SECTION — must be included` : ""}
+${brief.ymyl_section_required ? `${brief.h2_outline.length + 2}` : `${brief.h2_outline.length + 1}`}. Track What's Actually Affecting Your Breathing  ← CTA heading (exact text)
+${brief.ymyl_section_required ? `${brief.h2_outline.length + 3}` : `${brief.h2_outline.length + 2}`}. Further Reading
 
-Feature to highlight (RespireLYF, at ~70%): "${brief.feature_to_highlight}"
+Feature to highlight at ~70% mark: "${brief.feature_to_highlight}"
 
-FDA language red flags for this topic (avoid):
+FDA phrases to avoid for this topic:
 ${brief.fda_red_flags.map((f) => `- "${f}"`).join("\n")}
 
-Internal links to weave in naturally:
+Internal links:
 ${internalLinksStr}
 
-Outbound links for Further Reading section:
+Outbound links for Further Reading:
 ${outboundStr}
 ━━━━━━━━━━━━━━━━━━━━━
 
-${feedbackFromEvaluator ? `━━━ EVALUATOR FEEDBACK (from previous iteration) ━━━\n${feedbackFromEvaluator}\n━━━━━━━━━━━━━━━━━━━━━\n\nFix these issues while keeping everything else intact.` : ""}
+${feedbackFromEvaluator ? `━━━ EVALUATOR FEEDBACK — fix ALL of these before resubmitting ━━━\n${feedbackFromEvaluator}\n━━━━━━━━━━━━━━━━━━━━━\n` : ""}
+━━━ FINAL CHECKLIST — tick every box before outputting ━━━
+□ Word count 800–1,400 (I counted: ___ words)
+□ Primary keyword "${brief.yaml_frontmatter.primary_keyword}" is in the OPENING PARAGRAPH
+□ <!-- IMAGE: hero --> present at top
+□ <!-- IMAGE: inline --> present mid-article
+□ <!-- IMAGE: cta --> present near end
+□ Each image has a <!-- PROMPT: --> comment after it
+${brief.ymyl_section_required ? "□ ## When to See a Doctor section written (3-5 sentences of clinical warning signs)\n" : ""}□ ## Track What's Actually Affecting Your Breathing heading (exact text, no changes)
+□ ## Further Reading section with outbound links
+□ No banned words: journey / empower / transform / game-changer / revolutionary / unlock
 
-Write the complete article now. Start with the YAML frontmatter block.`;
+All boxes checked? → Output the article now. Start with the YAML frontmatter.`;
 }
 
 // ─── Save blog to disk ─────────────────────────────────────────────────────
