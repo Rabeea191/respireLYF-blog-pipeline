@@ -7,7 +7,7 @@
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc",
     "tier1": "npm run build && node dist/pipeline/tier1-orchestrator.js",
     "tier2": "npm run build && node dist/pipeline/tier2-orchestrator.js",
-    "post-blog": "npm run build && node dist/scripts/post-existing-blog.js",
+    "post-blog": "node post-blog.js",
     "type-check": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit"
   },
   "dependencies": {
