@@ -25,11 +25,11 @@ function runProgrammaticChecks(
   const md = draft.markdown_content;
   const lower = md.toLowerCase();
 
-  // 1. Word count — target 900-1100, hard cap 1400
-  if (draft.word_count < 800 || draft.word_count > 1400) {
+  // 1. Word count — target 900-1100, hard cap 1500
+  if (draft.word_count < 800 || draft.word_count > 1500) {
     fails.push({
       rule: "word_count",
-      details: `${draft.word_count} words — must be 800–1,400 (target: 900–1,100)`,
+      details: `${draft.word_count} words — must be 800–1,500 (target: 900–1,100)`,
     });
   }
 

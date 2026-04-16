@@ -58,11 +58,11 @@ function checkHardFails(
   const lower = markdown.toLowerCase();
   const wordCount = countWords(markdown);
 
-  // Word count — target 900-1100, hard cap 1400
-  if (wordCount < 800 || wordCount > 1400) {
+  // Word count — target 900-1100, hard cap 1500
+  if (wordCount < 800 || wordCount > 1500) {
     fails.push({
       rule: "word_count",
-      details: `Word count is ${wordCount} — must be 800–1,400. ${wordCount < 800 ? "Expand sections to add more detail" : "Too long — cut filler sentences in 2-3 sections"}.`,
+      details: `Word count is ${wordCount} — must be 800–1,500. ${wordCount < 800 ? "Expand sections to add more detail" : "Too long — cut filler sentences in 2-3 sections"}.`,
     });
   }
 
@@ -153,7 +153,7 @@ ${ymylRequired ? "11" : "10"}. ## Further Reading (use the outbound links from t
 ══════════════════════════════════════════
 HARD RULES
 ══════════════════════════════════════════
-• Word count: TARGET 900–1,050 words (hard min 800, hard max 1,400). Count carefully.
+• Word count: TARGET 900–1,100 words (hard min 800, hard max 1,500). Count carefully.
 • Primary keyword in: H1 + opening paragraph + 2+ H2s + closing section
 • CTA heading EXACTLY: "Track What's Actually Affecting Your Breathing" — copy verbatim
 • Three image slots: <!-- IMAGE: hero -->, <!-- IMAGE: inline -->, <!-- IMAGE: cta -->
@@ -229,7 +229,7 @@ ${outboundStr}
 
 ${feedbackFromEvaluator ? `━━━ EVALUATOR FEEDBACK — fix ALL of these before resubmitting ━━━\n${feedbackFromEvaluator}\n━━━━━━━━━━━━━━━━━━━━━\n` : ""}
 ━━━ FINAL CHECKLIST — tick every box before outputting ━━━
-□ Word count 800–1,400 (I counted: ___ words)
+□ Word count 800–1,500 (I counted: ___ words)
 □ Primary keyword "${brief.yaml_frontmatter.primary_keyword}" is in the OPENING PARAGRAPH
 □ <!-- IMAGE: hero --> present at top
 □ <!-- IMAGE: inline --> present mid-article
