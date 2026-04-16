@@ -192,7 +192,8 @@ export async function runBlogEvaluator(
     if (softScores.tone_quality.score < 7)
       softIssues.push(`[TONE ${softScores.tone_quality.score}/10] ${softScores.tone_quality.note}`);
 
-    const passed = hardFails.length === 0 && softTotal >= 21; // 7+7+7 minimum
+    // Pass = zero hard fails. Soft scores are advisory (shown in Payload for human review).
+    const passed = hardFails.length === 0;
 
     const feedbackParts: string[] = [];
     if (hardFails.length > 0) {
@@ -218,9 +219,9 @@ export async function runBlogEvaluator(
     };
 
     if (passed) {
-      logger.info("blog-gate", `✅ Draft approved — ${hardFails.length} hard fails, soft ${softTotal}/30`);
+      logger.info("blog-gate", `✅ Draft approved — 0 hard fails, soft score ${softTotal}/30 (advisory)`);
     } else {
-      logger.warn("blog-gate", `❌ Draft failed — ${hardFails.length} hard fails, soft ${softTotal}/30`);
+      logger.warn("blog-gate", `❌ Draft failed — ${hardFails.length} hard fail(s), soft ${softTotal}/30`);
     }
 
     return {
