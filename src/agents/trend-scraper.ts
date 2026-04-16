@@ -39,11 +39,18 @@ const SEED_QUERIES = [
 // ─── RSS feeds ────────────────────────────────────────────────────────────────
 const RSS_FEEDS: Array<{ url: string; source: TrendSource["name"] }> = [
   {
+    // CDC Healthy Living / Respiratory RSS
     url: "https://tools.cdc.gov/api/v2/resources/media/132608.rss",
     source: "rss_cdc",
   },
   {
-    url: "https://www.nhlbi.nih.gov/rss/news",
+    // NHLBI press releases (updated URL)
+    url: "https://www.nhlbi.nih.gov/news/press-releases",
+    source: "rss_nhlbi",
+  },
+  {
+    // American Lung Association blog RSS
+    url: "https://www.lung.org/blog/rss.xml",
     source: "rss_nhlbi",
   },
 ];

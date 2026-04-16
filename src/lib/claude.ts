@@ -1,6 +1,10 @@
 /**
  * Claude API wrapper — all agent LLM calls go through here.
  * Handles retries, token tracking, and structured JSON output.
+ *
+ * Supports two call signatures:
+ *   1. Options object:  callClaude({ stage, system, user, ... })
+ *   2. Positional args: callClaude(system, user)  → returns Promise<string>
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -9,27 +13,28 @@ import { logger } from "./logger";
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
-interface CallOptions {
+export interface CallOptions {
   stage: string;
   system: string;
   user: string;
   run_id?: string;
   temperature?: number;
   max_tokens?: number;
+  iteration?: number;
+  schema_hint?: string;
 }
 
-interface ClaudeResponse {
+export interface ClaudeResponse {
   text: string;
   tokens_used: number;
   duration_ms: number;
 }
 
-/**
- * Base call — returns raw text. All other helpers build on this.
- */
-export async function callClaude(opts: CallOptions): Promise<ClaudeResponse> {
+// ─── Internal base call ───────────────────────────────────────────────────────
+
+async function _callClaude(opts: CallOptions): Promise<ClaudeResponse> {
   const start = Date.now();
-  logger.debug(opts.stage, "Calling Claude", { run_id: opts.run_id });
+  logger.info(opts.stage || "claude", "Calling Claude", { run_id: opts.run_id });
 
   const response = await client.messages.create({
     model: config.anthropic.model,
@@ -45,7 +50,7 @@ export async function callClaude(opts: CallOptions): Promise<ClaudeResponse> {
     (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0);
   const duration_ms = Date.now() - start;
 
-  logger.debug(opts.stage, `Claude responded`, {
+  logger.info(opts.stage || "claude", `Claude responded`, {
     run_id: opts.run_id,
     data: { tokens_used, duration_ms },
   });
@@ -53,35 +58,86 @@ export async function callClaude(opts: CallOptions): Promise<ClaudeResponse> {
   return { text, tokens_used, duration_ms };
 }
 
+// ─── callClaude — overloaded ──────────────────────────────────────────────────
+
 /**
- * Structured JSON call — parses the response as JSON.
- * Claude is instructed to return ONLY valid JSON.
+ * Options-object form → returns full ClaudeResponse
+ */
+export async function callClaude(opts: CallOptions): Promise<ClaudeResponse>;
+
+/**
+ * Positional form → returns plain string (convenience wrapper)
+ */
+export async function callClaude(
+  system: string,
+  user: string,
+  _modelIgnored?: string
+): Promise<string>;
+
+export async function callClaude(
+  optsOrSystem: CallOptions | string,
+  user?: string,
+  _modelIgnored?: string
+): Promise<ClaudeResponse | string> {
+  if (typeof optsOrSystem === "string") {
+    // Positional call → return plain string
+    const result = await _callClaude({
+      stage: "claude",
+      system: optsOrSystem,
+      user: user ?? "",
+    });
+    return result.text;
+  }
+  return _callClaude(optsOrSystem);
+}
+
+// ─── callClaudeJSON — overloaded ──────────────────────────────────────────────
+
+/**
+ * Options-object form → returns parsed T (with _tokens_used, _duration_ms)
  */
 export async function callClaudeJSON<T>(
-  opts: CallOptions & { schema_hint?: string }
-): Promise<T & { _tokens_used: number; _duration_ms: number }> {
-  const system = `${opts.system}
+  opts: CallOptions
+): Promise<T>;
+
+/**
+ * Positional form → returns parsed T
+ */
+export async function callClaudeJSON<T>(
+  system: string,
+  user: string,
+  _modelIgnored?: string
+): Promise<T>;
+
+export async function callClaudeJSON<T>(
+  optsOrSystem: CallOptions | string,
+  user?: string,
+  _modelIgnored?: string
+): Promise<T> {
+  let opts: CallOptions;
+
+  if (typeof optsOrSystem === "string") {
+    opts = { stage: "claude", system: optsOrSystem, user: user ?? "" };
+  } else {
+    opts = optsOrSystem;
+  }
+
+  const jsonSystemPrompt = `${opts.system}
 
 CRITICAL OUTPUT RULE: Your entire response must be valid JSON only.
 No markdown code blocks. No explanation text before or after.
 Just the raw JSON object.${opts.schema_hint ? `\n\nExpected schema:\n${opts.schema_hint}` : ""}`;
 
-  const result = await callClaude({ ...opts, system });
+  const result = await _callClaude({ ...opts, system: jsonSystemPrompt });
 
   try {
-    // Strip any accidental markdown fences
     const cleaned = result.text
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")
       .replace(/\s*```$/i, "")
       .trim();
 
-    const parsed = JSON.parse(cleaned) as T;
-    return {
-      ...parsed,
-      _tokens_used: result.tokens_used,
-      _duration_ms: result.duration_ms,
-    };
+    return JSON.parse(cleaned) as T;
   } catch (err) {
     logger.error(opts.stage, "Failed to parse Claude JSON response", {
       run_id: opts.run_id,

@@ -107,7 +107,33 @@ export async function runTopicGenerator(
     iteration,
   });
 
-  const userPrompt = `
+  // ── Fallback: no external signals → use seasonal + clinical knowledge ─────
+  const now = new Date();
+  const month = now.toLocaleString("en-US", { month: "long" });
+  const season = getSeason(now.getMonth());
+
+  const userPrompt = passedSignals.length === 0
+    ? `
+No external trend signals were available this run. Generate 5 high-value blog topics
+based on YOUR knowledge of what respiratory health patients search for in ${month} (${season}).
+
+Consider these seasonal/clinical angles for ${season}:
+- ${season === "Spring" ? "pollen season, allergy-asthma overlap, outdoor exercise triggers" :
+    season === "Summer" ? "heat & humidity effects on breathing, air quality, vacation management" :
+    season === "Fall"   ? "ragweed pollen, cold air triggers, flu prep for COPD/asthma patients" :
+                          "cold air triggers, indoor allergens, RSV & flu interaction with asthma/COPD"}
+- Medication adherence and inhaler technique
+- Food/diet impact on respiratory health
+- Sleep and breathing correlation
+- Stress and flare management
+
+ALREADY PUBLISHED SLUGS (do not duplicate these topics):
+${publishedSlugs.length > 0 ? publishedSlugs.join("\n") : "(none yet)"}
+
+${previousFeedback ? `PREVIOUS ATTEMPT FEEDBACK (fix these issues):\n${previousFeedback}\n` : ""}
+
+Generate exactly 5 topic candidates. Return only the JSON array.`
+    : `
 TRENDING SIGNALS THIS WEEK (use these as inspiration):
 ${JSON.stringify(passedSignals.map(s => ({
   query: s.raw_query,
@@ -118,7 +144,7 @@ ${JSON.stringify(passedSignals.map(s => ({
 })), null, 2)}
 
 ALREADY PUBLISHED SLUGS (do not duplicate these topics):
-${publishedSlugs.join("\n")}
+${publishedSlugs.length > 0 ? publishedSlugs.join("\n") : "(none yet)"}
 
 ${previousFeedback ? `PREVIOUS ATTEMPT FEEDBACK (fix these issues):\n${previousFeedback}\n` : ""}
 
@@ -166,6 +192,14 @@ Generate exactly 5 topic candidates. Return only the JSON array.`;
 
   logger.info("topic_generator", `Generated ${cards.length} topic cards`, { run_id, iteration });
   return cards;
+}
+
+// ─── Helper: map month index → season name ────────────────────────────────────
+function getSeason(month: number): "Spring" | "Summer" | "Fall" | "Winter" {
+  if (month >= 2 && month <= 4) return "Spring";
+  if (month >= 5 && month <= 7) return "Summer";
+  if (month >= 8 && month <= 10) return "Fall";
+  return "Winter";
 }
 
 /**

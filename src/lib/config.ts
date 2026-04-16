@@ -1,7 +1,13 @@
 /**
  * Centralised config — all env vars validated at startup.
- * If a required variable is missing the process exits immediately with a clear error.
+ * Loads .env file automatically via dotenv.
  */
+
+import { config as dotenvConfig } from "dotenv";
+import path from "path";
+
+// Load .env from project root
+dotenvConfig({ path: path.join(process.cwd(), ".env") });
 
 function require_env(key: string): string {
   const val = process.env[key];
@@ -16,42 +22,40 @@ function optional_env(key: string, fallback = ""): string {
 export const config = {
   anthropic: {
     apiKey: require_env("ANTHROPIC_API_KEY"),
-    model: optional_env("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-  },
-
-  supabase: {
-    url: require_env("SUPABASE_URL"),
-    anonKey: require_env("SUPABASE_ANON_KEY"),
-    serviceRoleKey: require_env("SUPABASE_SERVICE_ROLE_KEY"),
+    model:  optional_env("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
   },
 
   serpApi: {
-    key: require_env("SERP_API_KEY"),
+    key: optional_env("SERP_API_KEY"), // optional — scraper skips if missing
   },
 
   reddit: {
-    clientId: require_env("REDDIT_CLIENT_ID"),
-    clientSecret: require_env("REDDIT_CLIENT_SECRET"),
-    userAgent: optional_env("REDDIT_USER_AGENT", "RespireLYF-Pipeline/1.0"),
+    clientId:     optional_env("REDDIT_CLIENT_ID"),
+    clientSecret: optional_env("REDDIT_CLIENT_SECRET"),
+    userAgent:    optional_env("REDDIT_USER_AGENT", "RespireLYF-Pipeline/1.0"),
   },
 
   clickup: {
-    apiKey: require_env("CLICKUP_API_KEY"),
-    listId: require_env("CLICKUP_LIST_ID"),        // The list where topic cards are created
+    apiKey:      require_env("CLICKUP_API_KEY"),
+    listId:      require_env("CLICKUP_LIST_ID"),
     workspaceId: require_env("CLICKUP_WORKSPACE_ID"),
     webhookSecret: optional_env("CLICKUP_WEBHOOK_SECRET"),
-    // Status names — must match exactly what's configured in your ClickUp list
     statuses: {
-      pending:             optional_env("CLICKUP_STATUS_PENDING",           "To Review"),
-      approved:            optional_env("CLICKUP_STATUS_APPROVED",          "Approved"),
-      approvedWithNotes:   optional_env("CLICKUP_STATUS_APPROVED_NOTES",    "Approved - Needs Tweak"),
-      rejected:            optional_env("CLICKUP_STATUS_REJECTED",          "Rejected"),
+      pending:           optional_env("CLICKUP_STATUS_PENDING",        "To Review"),
+      approved:          optional_env("CLICKUP_STATUS_APPROVED",       "Approved"),
+      approvedWithNotes: optional_env("CLICKUP_STATUS_APPROVED_NOTES", "Approved - Needs Tweak"),
+      rejected:          optional_env("CLICKUP_STATUS_REJECTED",       "Rejected"),
     },
+  },
+
+  payload: {
+    url:      optional_env("PAYLOAD_URL",      "http://localhost:3000"),
+    email:    optional_env("PAYLOAD_EMAIL",    ""),
+    password: optional_env("PAYLOAD_PASSWORD", ""),
   },
 
   pipeline: {
     approvalThreshold: parseInt(optional_env("APPROVAL_THRESHOLD", "3"), 10),
-    maxTopicRetries: parseInt(optional_env("MAX_TOPIC_RETRIES", "3"), 10),
-    appUrl: optional_env("NEXT_PUBLIC_APP_URL", "http://localhost:3000"),
+    maxTopicRetries:   parseInt(optional_env("MAX_TOPIC_RETRIES",  "3"), 10),
   },
 } as const;

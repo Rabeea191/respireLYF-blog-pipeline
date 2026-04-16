@@ -105,6 +105,8 @@ export interface TopicCard {
   human_notes?: string;
   // Set by TopicRefiner if notes provided
   refined_at?: string;
+  // Set after posting to ClickUp
+  clickup_task_id?: string;
 }
 
 // ─── Topic Evaluation ─────────────────────────────────────────────────────────

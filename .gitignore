@@ -4,3 +4,4 @@ dist/
 .env.local
 *.js.map
 blogs/
+pipeline-data/

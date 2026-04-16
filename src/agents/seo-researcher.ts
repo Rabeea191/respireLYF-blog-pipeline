@@ -35,7 +35,7 @@ const APPROVED_OUTBOUND_ORGS = ["CDC", "NIH", "NHLBI", "GINA", "GOLD", "FDA", "A
 
 // ─── SerpAPI competitor search ─────────────────────────────────────────────
 async function fetchCompetitorUrls(keyword: string): Promise<string[]> {
-  if (!config.SERP_API_KEY) {
+  if (!config.serpApi.key) {
     logger.warn("seo-researcher", "SERP_API_KEY missing — skipping competitor fetch");
     return [];
   }
@@ -44,7 +44,7 @@ async function fetchCompetitorUrls(keyword: string): Promise<string[]> {
     const res = await axios.get("https://serpapi.com/search", {
       params: {
         q: keyword,
-        api_key: config.SERP_API_KEY,
+        api_key: config.serpApi.key,
         engine: "google",
         gl: "us",
         hl: "en",

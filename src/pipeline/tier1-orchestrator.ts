@@ -205,3 +205,17 @@ function getWeekOf(): string {
   const monday = new Date(now.setDate(diff));
   return monday.toISOString().split("T")[0];
 }
+
+// ─── Run directly ─────────────────────────────────────────────────────────────
+runTier1Pipeline()
+  .then((run) => {
+    console.log(`\n✅ Tier 1 complete — run ID: ${run.id}`);
+    console.log(`   Status: ${run.status}`);
+    console.log(`   Topics: ${run.topic_cards?.length ?? 0}`);
+    console.log(`\n   Check ClickUp — topics should appear in "Blog Topic Review" list!`);
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error("\n❌ Tier 1 failed:", err.message);
+    process.exit(1);
+  });
