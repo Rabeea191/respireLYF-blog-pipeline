@@ -285,13 +285,14 @@ export async function runTier2Pipeline(approvedTopics: TopicCard[]): Promise<Tie
 async function main() {
   logger.info("tier2", "=== Tier 2 Pipeline Starting ===");
 
-  // Check for --all flag (bypass ClickUp check — run all local topics)
+  // Flags
   const runAll = process.argv.includes("--all");
+  const runOne = process.argv.includes("--one");
 
   let approvedTopics: TopicCard[];
 
   if (runAll) {
-    logger.info("tier2", "--all flag set: treating all local topics as approved");
+    logger.info("tier2", "--all flag: treating all local topics as approved");
     const dataDir = path.join(process.cwd(), "pipeline-data");
     const topicsFile = path.join(dataDir, "latest-topics.json");
     if (!fs.existsSync(topicsFile)) {
@@ -302,15 +303,31 @@ async function main() {
   } else {
     logger.info("tier2", "Checking ClickUp for approved topics…");
     approvedTopics = await getApprovedTopicsFromClickUp();
+
+    // Fallback: if ClickUp returns 0 (e.g. status name mismatch), read local store
+    if (approvedTopics.length === 0) {
+      logger.warn("tier2", "0 approved topics from ClickUp — falling back to local store");
+      const dataDir  = path.join(process.cwd(), "pipeline-data");
+      const topicsFile = path.join(dataDir, "latest-topics.json");
+      if (fs.existsSync(topicsFile)) {
+        approvedTopics = JSON.parse(fs.readFileSync(topicsFile, "utf-8"));
+        logger.info("tier2", `Fallback: loaded ${approvedTopics.length} topics from local store`);
+      }
+    }
   }
 
   if (approvedTopics.length === 0) {
-    logger.warn("tier2", "No approved topics found — approve topics in ClickUp first, then re-run");
-    logger.warn("tier2", "Tip: or run `npm run tier2 -- --all` to process all topics");
+    logger.warn("tier2", "No topics found at all — run `npm run tier1` first");
     process.exit(0);
   }
 
-  logger.info("tier2", `Found ${approvedTopics.length} approved topics — starting blog production`);
+  // --one: only process the first topic (test mode)
+  if (runOne) {
+    logger.info("tier2", `--one flag: running only the first topic as a test`);
+    approvedTopics = [approvedTopics[0]];
+  }
+
+  logger.info("tier2", `Processing ${approvedTopics.length} topic(s) — starting blog production`);
   approvedTopics.forEach((t, i) => logger.info("tier2", `  ${i + 1}. "${t.title}"`));
 
   const results = await runTier2Pipeline(approvedTopics);
