@@ -4,9 +4,10 @@
   "description": "Multi-agent blog pipeline for RespireLYF — trend scraping to Payload CMS publishing",
   "private": true,
   "scripts": {
-    "tier1": "cross-env NODE_OPTIONS=--max-old-space-size=4096 ts-node-dev --transpile-only src/pipeline/tier1-orchestrator.ts",
-    "tier2": "cross-env NODE_OPTIONS=--max-old-space-size=4096 ts-node-dev --transpile-only src/pipeline/tier2-orchestrator.ts",
     "build": "tsc",
+    "tier1": "npm run build && cross-env NODE_OPTIONS=--max-old-space-size=4096 node dist/pipeline/tier1-orchestrator.js",
+    "tier2": "npm run build && cross-env NODE_OPTIONS=--max-old-space-size=4096 node dist/pipeline/tier2-orchestrator.js",
+    "post-blog": "npm run build && cross-env NODE_OPTIONS=--max-old-space-size=4096 node dist/scripts/post-existing-blog.js",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
