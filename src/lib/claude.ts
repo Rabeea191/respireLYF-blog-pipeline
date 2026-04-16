@@ -13,6 +13,32 @@ import { logger } from "./logger";
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
+// ─── Global token counter ────────────────────────────────────────────────────
+
+let _totalInputTokens  = 0;
+let _totalOutputTokens = 0;
+
+export function resetTokenStats() {
+  _totalInputTokens  = 0;
+  _totalOutputTokens = 0;
+}
+
+/**
+ * Returns cumulative token usage and estimated USD cost.
+ * Pricing: claude-sonnet-4-6 — $3/M input, $15/M output
+ */
+export function getTokenStats() {
+  const inputCost  = (_totalInputTokens  / 1_000_000) * 3;
+  const outputCost = (_totalOutputTokens / 1_000_000) * 15;
+  return {
+    input_tokens:  _totalInputTokens,
+    output_tokens: _totalOutputTokens,
+    total_tokens:  _totalInputTokens + _totalOutputTokens,
+    cost_usd:      parseFloat((inputCost + outputCost).toFixed(4)),
+    breakdown:     `$${inputCost.toFixed(4)} input + $${outputCost.toFixed(4)} output`,
+  };
+}
+
 export interface CallOptions {
   stage: string;
   system: string;
@@ -46,8 +72,11 @@ async function _callClaude(opts: CallOptions): Promise<ClaudeResponse> {
 
   const text =
     response.content[0].type === "text" ? response.content[0].text : "";
-  const tokens_used =
-    (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0);
+  const inputTok  = response.usage?.input_tokens  ?? 0;
+  const outputTok = response.usage?.output_tokens ?? 0;
+  _totalInputTokens  += inputTok;
+  _totalOutputTokens += outputTok;
+  const tokens_used = inputTok + outputTok;
   const duration_ms = Date.now() - start;
 
   logger.info(opts.stage || "claude", `Claude responded`, {

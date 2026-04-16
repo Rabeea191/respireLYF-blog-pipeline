@@ -23,6 +23,7 @@ import { runBlogEvaluator }  from "../evaluators/blog-gate";
 import { runPayloadPoster }  from "../agents/payload-poster";
 import { logger }            from "../lib/logger";
 import { config }            from "../lib/config";
+import { resetTokenStats, getTokenStats } from "../lib/claude";
 import * as fs               from "fs";
 import * as path             from "path";
 import type {
@@ -330,24 +331,39 @@ async function main() {
   logger.info("tier2", `Processing ${approvedTopics.length} topic(s) — starting blog production`);
   approvedTopics.forEach((t, i) => logger.info("tier2", `  ${i + 1}. "${t.title}"`));
 
+  // Reset token counter for this run
+  resetTokenStats();
+
   const results = await runTier2Pipeline(approvedTopics);
 
   const passed = results.filter((r) => r.success).length;
   const failed = results.filter((r) => !r.success).length;
+  const cost   = getTokenStats();
 
-  console.log("\n════════════════════════════════════════");
-  console.log(`✅  Tier 2 complete — ${passed} blogs produced, ${failed} failed`);
-  console.log("════════════════════════════════════════");
+  console.log("\n════════════════════════════════════════════════════");
+  console.log(`✅  Tier 2 complete — ${passed} blog(s) produced, ${failed} failed`);
+  console.log("════════════════════════════════════════════════════");
 
   results.forEach((r) => {
     if (r.success) {
       console.log(`  ✅  "${r.topic_title}"`);
-      if (r.payload_draft_url) console.log(`       Payload draft: ${r.payload_draft_url}`);
-      if (r.slug) console.log(`       Slug: ${r.slug}`);
+      if (r.payload_draft_url) console.log(`       Payload draft : ${r.payload_draft_url}`);
+      if (r.slug)              console.log(`       Slug          : ${r.slug}`);
     } else {
-      console.log(`  ❌  "${r.topic_title}" — ${r.error}`);
+      console.log(`  ❌  "${r.topic_title}"`);
+      console.log(`       Error         : ${r.error}`);
     }
   });
+
+  console.log("────────────────────────────────────────────────────");
+  console.log(`  💰 Claude API cost this run:`);
+  console.log(`     Tokens  : ${cost.input_tokens.toLocaleString()} in + ${cost.output_tokens.toLocaleString()} out = ${cost.total_tokens.toLocaleString()} total`);
+  console.log(`     Cost    : $${cost.cost_usd} USD  (${cost.breakdown})`);
+  if (passed > 0) {
+    const perBlog = (cost.cost_usd / passed).toFixed(4);
+    console.log(`     Per blog: ~$${perBlog} USD`);
+  }
+  console.log("════════════════════════════════════════════════════");
 
   process.exit(failed > 0 ? 1 : 0);
 }

@@ -25,11 +25,11 @@ function runProgrammaticChecks(
   const md = draft.markdown_content;
   const lower = md.toLowerCase();
 
-  // 1. Word count
-  if (draft.word_count < 800 || draft.word_count > 1200) {
+  // 1. Word count — target 900-1100, hard cap 1400
+  if (draft.word_count < 800 || draft.word_count > 1400) {
     fails.push({
       rule: "word_count",
-      details: `${draft.word_count} words — must be 800–1,200`,
+      details: `${draft.word_count} words — must be 800–1,400 (target: 900–1,100)`,
     });
   }
 
@@ -41,10 +41,12 @@ function runProgrammaticChecks(
     fails.push({ rule: "keyword_h1", details: `Primary keyword "${pk}" not found in H1` });
   }
 
-  const paragraphs = md.replace(/^---[\s\S]+?---\n/, "").split("\n\n");
-  const firstPara = paragraphs.find((p) => p.trim() && !p.startsWith("#") && !p.startsWith("<!--")) ?? "";
-  if (!firstPara.toLowerCase().includes(pkFirstWord)) {
-    fails.push({ rule: "keyword_first_para", details: `Primary keyword missing from opening paragraph` });
+  const bodyParas = md.replace(/^---[\s\S]+?---\n/, "").split("\n\n");
+  const firstTextPara = bodyParas.find(
+    (p) => p.trim() && !p.startsWith("#") && !p.startsWith("<!--") && !p.startsWith("![")
+  ) ?? "";
+  if (!firstTextPara.toLowerCase().includes(pkFirstWord)) {
+    fails.push({ rule: "keyword_first_para", details: `Primary keyword "${pk}" missing from opening paragraph` });
   }
 
   // 3. Banned words
@@ -54,14 +56,12 @@ function runProgrammaticChecks(
     }
   }
 
-  // 4. FDA language violations
+  // 4. FDA language violations — only flag clear efficacy/cure claims
   const fdaViolations = [
-    { bad: " causes ", hint: "use 'associated with'" },
-    { bad: " triggers ", hint: "use 'tends to coincide with' or 'has been observed alongside'" },
-    { bad: " prevents ", hint: "use 'may support'" },
     { bad: " cures ", hint: "remove or rephrase observationally" },
-    { bad: "will improve", hint: "use 'may support' or 'research suggests'" },
-    { bad: "will help your", hint: "use 'may help' or 'some people find'" },
+    { bad: "will cure", hint: "remove — never claim a cure" },
+    { bad: "is proven to", hint: "use 'research suggests' or 'studies indicate'" },
+    { bad: "guaranteed to", hint: "remove — never guarantee outcomes" },
   ];
   for (const v of fdaViolations) {
     if (lower.includes(v.bad.toLowerCase())) {

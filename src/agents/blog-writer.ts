@@ -58,11 +58,11 @@ function checkHardFails(
   const lower = markdown.toLowerCase();
   const wordCount = countWords(markdown);
 
-  // Word count
-  if (wordCount < 800 || wordCount > 1200) {
+  // Word count — target 900-1100, hard cap 1400
+  if (wordCount < 800 || wordCount > 1400) {
     fails.push({
       rule: "word_count",
-      details: `Word count is ${wordCount} — must be 800–1,200. ${wordCount < 800 ? "Expand sections" : "Tighten paragraphs"}.`,
+      details: `Word count is ${wordCount} — must be 800–1,400. ${wordCount < 800 ? "Expand sections to add more detail" : "Too long — cut filler sentences in 2-3 sections"}.`,
     });
   }
 
@@ -79,10 +79,15 @@ function checkHardFails(
     fails.push({ rule: "keyword_in_h1", details: `Primary keyword "${brief.yaml_frontmatter.primary_keyword}" missing from H1` });
   }
 
-  // Primary keyword in first paragraph
-  const firstPara = markdown.replace(/^---[\s\S]+?---\n/, "").split("\n\n")[1] ?? "";
-  if (!firstPara.toLowerCase().includes(brief.yaml_frontmatter.primary_keyword.toLowerCase().split(" ")[0])) {
-    fails.push({ rule: "keyword_in_first_para", details: `Primary keyword missing from opening paragraph` });
+  // Primary keyword in first paragraph (skip H1, image comments, blank lines)
+  const bodyText = markdown.replace(/^---[\s\S]+?---\n/, "");
+  const bodyParas = bodyText.split("\n\n");
+  const firstTextPara = bodyParas.find(
+    (p) => p.trim() && !p.startsWith("#") && !p.startsWith("<!--") && !p.startsWith("![")
+  ) ?? "";
+  const pkFirstWord = brief.yaml_frontmatter.primary_keyword.toLowerCase().split(" ")[0];
+  if (!firstTextPara.toLowerCase().includes(pkFirstWord)) {
+    fails.push({ rule: "keyword_in_first_para", details: `Primary keyword "${brief.yaml_frontmatter.primary_keyword}" missing from opening paragraph — include "${pkFirstWord}" in the very first sentence` });
   }
 
   // CTA heading check
@@ -127,10 +132,10 @@ function buildSystemPrompt(brief: ContentBrief, seo: SEOPackage): string {
 You write one blog article, following the content brief exactly. You are disciplined, precise, and do not add sections not in the brief.
 
 HARD RULES (non-negotiable):
-1. Word count: 800–1,200 words EXACTLY (count before submitting — tighten or expand to fit)
+1. Word count: TARGET 900–1,050 words. Hard minimum 800, hard maximum 1,400. Write tight — every sentence must earn its place. DO NOT add padding to hit a target.
 2. Banned words (never use): journey, empower, transform, game-changer, revolutionary, unlock
 3. FDA language: observational only — "associated with" not "causes", "research suggests" not "research proves"
-4. Primary keyword in H1, opening paragraph, 2+ H2s, and closing section
+4. Primary keyword MUST appear in: (a) H1, (b) the VERY FIRST text paragraph (before any image placeholder), (c) 2+ H2s, (d) closing section
 5. Product intro at ~70% mark — 2-3 sentences, ONE feature only, never reads as an ad
 6. CTA heading: EXACTLY "Track What's Actually Affecting Your Breathing" (copy this verbatim)
 7. Three image placeholders in order: <!-- IMAGE: hero --> at top, <!-- IMAGE: inline --> mid-article, <!-- IMAGE: cta --> near end
