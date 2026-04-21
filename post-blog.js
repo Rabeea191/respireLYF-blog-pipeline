@@ -885,6 +885,12 @@ async function createDraft(token, meta, content, opts = {}) {
     slug:          meta.slug,
     content,
     excerpt:       meta.meta_description || "",
+    // Use the custom `status` select field (not Payload's built-in _status).
+    // Default to "draft" for new posts so a human reviews before publishing.
+    status: "draft",
+    // publishedDate is required by the collection — set to today for new drafts.
+    // Human will update this when they actually publish the post.
+    publishedDate: new Date().toISOString(),
     seo: {
       metaTitle:         meta.meta_title       || "",
       metaDescription:   meta.meta_description || "",
@@ -901,21 +907,23 @@ async function createDraft(token, meta, content, opts = {}) {
   const existing = await findBySlug(token, body.slug);
   const method   = existing ? "PATCH" : "POST";
   // IMPORTANT:
-  //   NEW posts  → force _status="draft" so human review is required before publish.
-  //                Use ?draft=true so Payload's Drafts plugin stores it as a draft version.
-  //                Do NOT send publishedDate — human will set it when they click Publish.
-  //   EXISTING   → do NOT touch _status or publishedDate. If the human has already
-  //                approved/published the post, running the pipeline again must not
-  //                demote it back to draft. Preserve whatever state they set.
-  if (!existing) {
-    body._status = "draft";
+  //   NEW posts  → POST with status="draft" + today's publishedDate.
+  //                Human sets the real publish date when they review and publish.
+  //   EXISTING   → PATCH but do NOT override status if already published.
+  //                Preserve whatever state the human set.
+  if (existing) {
+    // Don't downgrade a published post back to draft on re-run
+    delete body.status;
+    delete body.publishedDate;
   }
+  // No ?draft=true — this collection uses a plain `status` field, not Payload's
+  // built-in versions/drafts system.
   const endpoint = existing
-    ? `${PAYLOAD_URL}/api/blog/${existing.id}?depth=0&fallback-locale=null&draft=true`
-    : `${PAYLOAD_URL}/api/blog?depth=0&fallback-locale=null&draft=true`;
+    ? `${PAYLOAD_URL}/api/blog/${existing.id}?depth=0&fallback-locale=null`
+    : `${PAYLOAD_URL}/api/blog?depth=0&fallback-locale=null`;
 
   if (existing) {
-    console.log(`🔎  [DEBUG] Found existing id=${existing.id} (title="${existing.title}", _status=${existing._status || "?"}) — will UPDATE (status preserved, not overwritten).`);
+    console.log(`🔎  [DEBUG] Found existing id=${existing.id} (title="${existing.title}", status=${existing.status || "?"}) — will UPDATE (status preserved, not overwritten).`);
   } else {
     console.log(`🔎  [DEBUG] No existing doc — will CREATE as DRAFT (for human review).`);
   }

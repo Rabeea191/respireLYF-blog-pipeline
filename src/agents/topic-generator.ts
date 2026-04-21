@@ -2,7 +2,7 @@
  * Tier 1 — Topic Generator Agent
  *
  * Takes top passed TrendSignals + published slug archive and produces
- * exactly 5 topic candidates for the week.
+ * exactly 10 topic candidates for the week.
  *
  * Rules enforced:
  *   - Title under 60 chars
@@ -42,7 +42,7 @@ const BANNED_WORDS = [
 
 const SYSTEM_PROMPT = `You are the Topic Generator for RespireLYF — an AI-powered respiratory health management app for US adults living with asthma or COPD.
 
-Your job: given a list of trending signals and an archive of already-published blog slugs, generate exactly 5 distinct, high-quality blog topic candidates for this week.
+Your job: given a list of trending signals and an archive of already-published blog slugs, generate exactly 10 distinct, high-quality blog topic candidates for this week.
 
 BRAND CONTEXT:
 - RespireLYF tracks 10 Health Determinants (medications, food, hydration, weather, sleep, activity, stress) and 5 Health Indicators (cough, breathing score, peak flow, ACT/CAT surveys, vitals)
@@ -114,7 +114,7 @@ TOPIC TYPES (pick the most accurate):
 - "cough_specific" — cough patterns, types, causes
 - "lifestyle_factor" — sleep, food, stress, hydration, exercise
 
-OUTPUT: Return a JSON array of exactly 5 topic objects.`;
+OUTPUT: Return a JSON array of exactly 10 topic objects.`;
 
 interface RawTopicOutput {
   title: string;
@@ -147,7 +147,7 @@ export async function runTopicGenerator(
 
   const userPrompt = passedSignals.length === 0
     ? `
-No external trend signals were available this run. Generate 5 high-value blog topics
+No external trend signals were available this run. Generate 10 high-value blog topics
 based on YOUR knowledge of what respiratory health patients search for in ${month} (${season}).
 
 Consider these seasonal/clinical angles for ${season}:
@@ -165,7 +165,7 @@ ${publishedSlugs.length > 0 ? publishedSlugs.join("\n") : "(none yet)"}
 
 ${previousFeedback ? `PREVIOUS ATTEMPT FEEDBACK (fix these issues):\n${previousFeedback}\n` : ""}
 
-Generate exactly 5 topic candidates. Return only the JSON array.`
+Generate exactly 10 topic candidates. Return only the JSON array.`
     : `
 TRENDING SIGNALS THIS WEEK (use these as inspiration):
 ${JSON.stringify(passedSignals.map(s => ({
@@ -181,7 +181,7 @@ ${publishedSlugs.length > 0 ? publishedSlugs.join("\n") : "(none yet)"}
 
 ${previousFeedback ? `PREVIOUS ATTEMPT FEEDBACK (fix these issues):\n${previousFeedback}\n` : ""}
 
-Generate exactly 5 topic candidates. Return only the JSON array.`;
+Generate exactly 10 topic candidates. Return only the JSON array.`;
 
   const raw = await callClaudeJSON<RawTopicOutput[]>({
     stage: "topic_generator",
@@ -196,7 +196,7 @@ Generate exactly 5 topic candidates. Return only the JSON array.`;
   const results = Array.isArray(raw) ? raw : [];
 
   // Map raw output → TopicCard, enforce hard constraints locally
-  const cards: TopicCard[] = results.slice(0, 5).map((r) => {
+  const cards: TopicCard[] = results.slice(0, 10).map((r) => {
     const slug = r.primary_keyword
       .toLowerCase()
       .replace(/[^a-z0-9\s-]/g, "")

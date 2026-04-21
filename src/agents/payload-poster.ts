@@ -272,8 +272,12 @@ async function createDraft(
     title:         meta["meta_title"]         ?? brief.yaml_frontmatter.meta_title,
     slug,
     content,
-    // Always post as a draft so a human reviews in Payload before publish.
-    _status:       "draft",
+    // Use the custom `status` select field (not Payload's built-in _status).
+    // The collection has no Versions/Drafts plugin — status is a plain select.
+    status:        "draft",
+    // publishedDate is required by the collection. Set to now; human updates
+    // it to the real publish date when they review and publish in the admin.
+    publishedDate: new Date().toISOString(),
     excerpt:       meta["meta_description"]   ?? brief.yaml_frontmatter.meta_description,
     seo: {
       metaTitle:       meta["meta_title"]       ?? brief.yaml_frontmatter.meta_title,
@@ -289,9 +293,10 @@ async function createDraft(
   }
 
   const { url: PAYLOAD_URL } = getPayloadConfig();
-  // ?draft=true tells Payload's Drafts plugin to store this as a draft version.
+  // No ?draft=true — the collection uses a plain `status` field, not Payload's
+  // built-in Versions/Drafts system.
   const res = await fetch(
-    `${PAYLOAD_URL}/api/blog?depth=0&fallback-locale=null&draft=true`,
+    `${PAYLOAD_URL}/api/blog?depth=0&fallback-locale=null`,
     {
       method: "POST",
       headers: {
@@ -302,15 +307,23 @@ async function createDraft(
     },
   );
 
-  const result = await res.json() as any;
+  const rawText = await res.text();
+  let result: any;
+  try { result = JSON.parse(rawText); }
+  catch { throw new Error(`Payload create response not JSON (${res.status}): ${rawText.slice(0, 300)}`); }
 
   if (!res.ok) {
-    throw new Error(`Payload create failed: ${JSON.stringify(result.errors ?? result)}`);
+    throw new Error(`Payload create failed (${res.status}): ${JSON.stringify(result.errors ?? result)}`);
+  }
+
+  const id = result.doc?.id ?? result.id;
+  if (!id) {
+    throw new Error(`Payload create returned 2xx but no id. Body: ${rawText.slice(0, 500)}`);
   }
 
   return {
-    id: result.doc?.id ?? result.id,
-    adminUrl: `${getPayloadConfig().url}/admin/collections/blog/${result.doc?.id}`,
+    id,
+    adminUrl: `${getPayloadConfig().url}/admin/collections/blog/${id}`,
   };
 }
 
