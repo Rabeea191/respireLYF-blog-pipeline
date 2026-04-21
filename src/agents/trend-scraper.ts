@@ -18,7 +18,10 @@ import { logger } from "../lib/logger";
 import type { TrendSignal, TrendSource } from "../types";
 import { randomUUID } from "crypto";
 
-const rssParser = new Parser();
+const rssParser = new Parser({
+  timeout: 8000, // 8s per feed — serverless functions don't have time to wait longer
+  headers: { "User-Agent": "RespireLYF-Pipeline/1.0" },
+});
 
 // ─── Seed queries for SerpAPI autocomplete ────────────────────────────────────
 const SEED_QUERIES = [
@@ -72,6 +75,13 @@ function detectSeasonalContext(): string | undefined {
 async function scrapeGoogleTrends(run_id: string): Promise<TrendSignal[]> {
   const signals: TrendSignal[] = [];
   const seasonal = detectSeasonalContext();
+
+  // Skip if no SerpAPI key — otherwise we hammer the endpoint with invalid calls
+  // and eat the function's time budget before even reaching topic generation.
+  if (!config.serpApi.key) {
+    logger.warn("trend_scraper", "SERP_API_KEY not set — skipping Google Trends", { run_id });
+    return signals;
+  }
 
   for (const query of SEED_QUERIES) {
     try {
@@ -156,6 +166,13 @@ async function getRedditToken(): Promise<string> {
 async function scrapeReddit(run_id: string): Promise<TrendSignal[]> {
   const signals: TrendSignal[] = [];
   const seasonal = detectSeasonalContext();
+
+  // Skip if Reddit creds missing — auth call will just 401 otherwise and
+  // chew into the function's time budget.
+  if (!config.reddit.clientId || !config.reddit.clientSecret) {
+    logger.warn("trend_scraper", "Reddit credentials not set — skipping Reddit", { run_id });
+    return signals;
+  }
 
   try {
     const token = await getRedditToken();
@@ -270,13 +287,24 @@ function isRespiratoryRelevant(text: string): boolean {
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
+// Wrap any scraper with an overall timeout so a single slow external API
+// cannot stall the whole serverless invocation.
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 export async function runTrendScraper(run_id: string): Promise<TrendSignal[]> {
   logger.info("trend_scraper", "Starting all sources", { run_id });
 
   const [googleSignals, redditSignals, rssSignals] = await Promise.allSettled([
-    scrapeGoogleTrends(run_id),
-    scrapeReddit(run_id),
-    scrapeRSSFeeds(run_id),
+    withTimeout(scrapeGoogleTrends(run_id), 25_000, "Google Trends"),
+    withTimeout(scrapeReddit(run_id),       15_000, "Reddit"),
+    withTimeout(scrapeRSSFeeds(run_id),     20_000, "RSS feeds"),
   ]);
 
   const all: TrendSignal[] = [
