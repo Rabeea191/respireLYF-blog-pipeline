@@ -27,16 +27,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   logger.info("cron_trigger", "Pipeline triggered — starting Tier 1");
 
+  // NOTE: Vercel serverless functions terminate as soon as the HTTP response
+  // is sent, so we can't use a fire-and-forget pattern. Run the pipeline
+  // to completion first, then respond. Function maxDuration is 300s which
+  // is comfortably above the ~2-3 min the pipeline needs in practice.
   try {
-    // Fire and forget — Vercel cron has a 60s timeout but the pipeline
-    // takes longer, so we respond immediately and run async
-    res.status(202).json({ message: "Pipeline started", timestamp: new Date().toISOString() });
-
-    // Run pipeline after responding
-    await runTier1Pipeline();
-
+    const run = await runTier1Pipeline();
+    res.status(200).json({
+      message: "Pipeline complete",
+      run_id: run.id,
+      topic_count: run.topic_cards?.length ?? 0,
+      status: run.status,
+      timestamp: new Date().toISOString(),
+    });
   } catch (err) {
     logger.error("cron_trigger", `Pipeline trigger failed: ${String(err)}`);
-    // Already responded 202 — just log the error
+    res.status(500).json({
+      error: "Pipeline failed",
+      message: String(err),
+      timestamp: new Date().toISOString(),
+    });
   }
 }

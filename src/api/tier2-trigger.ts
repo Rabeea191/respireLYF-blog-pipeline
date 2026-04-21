@@ -31,48 +31,55 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   logger.info("tier2_trigger", "Trigger received — loading approved topics from ClickUp");
 
-  // Respond fast — Tier 2 runs long
-  res.status(202).json({
-    message: "Tier 2 pipeline started",
-    timestamp: new Date().toISOString(),
-  });
+  // NOTE: Vercel serverless functions terminate as soon as the HTTP response
+  // is sent — fire-and-forget doesn't work. Run the full pipeline first and
+  // then respond. With 7 approved topics, Tier 2 usually completes within the
+  // 300s maxDuration ceiling; if it overruns, bump maxDuration or split the
+  // batch across multiple invocations.
+  try {
+    const approvedTopics = await loadApprovedTopicsFromClickUp();
 
-  // Fire async — do NOT await before responding
-  (async () => {
-    try {
-      const approvedTopics = await loadApprovedTopicsFromClickUp();
-
-      if (approvedTopics.length === 0) {
-        logger.warn(
-          "tier2_trigger",
-          "No approved topics found in ClickUp — nothing to run",
-        );
-        return;
-      }
-
-      logger.info(
-        "tier2_trigger",
-        `Running Tier 2 for ${approvedTopics.length} approved topic(s)`,
-      );
-      approvedTopics.forEach((t, i) =>
-        logger.info("tier2_trigger", `  ${i + 1}. "${t.title}"`),
-      );
-
-      resetTokenStats();
-      const results = await runTier2Pipeline(approvedTopics);
-
-      const passed = results.filter((r) => r.success).length;
-      const failed = results.filter((r) => !r.success).length;
-      const cost = getTokenStats();
-
-      logger.info(
-        "tier2_trigger",
-        `Tier 2 complete — ${passed} passed, ${failed} failed, $${cost.cost_usd} USD`,
-      );
-    } catch (err: any) {
-      logger.error("tier2_trigger", `Tier 2 async run failed: ${err.message}`, {
-        data: { error: String(err) },
+    if (approvedTopics.length === 0) {
+      logger.warn("tier2_trigger", "No approved topics found in ClickUp — nothing to run");
+      return res.status(200).json({
+        message: "No approved topics found",
+        timestamp: new Date().toISOString(),
       });
     }
-  })();
+
+    logger.info(
+      "tier2_trigger",
+      `Running Tier 2 for ${approvedTopics.length} approved topic(s)`,
+    );
+    approvedTopics.forEach((t, i) =>
+      logger.info("tier2_trigger", `  ${i + 1}. "${t.title}"`),
+    );
+
+    resetTokenStats();
+    const results = await runTier2Pipeline(approvedTopics);
+
+    const passed = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
+    const cost = getTokenStats();
+
+    logger.info(
+      "tier2_trigger",
+      `Tier 2 complete — ${passed} passed, ${failed} failed, $${cost.cost_usd} USD`,
+    );
+
+    res.status(200).json({
+      message: "Tier 2 pipeline complete",
+      passed,
+      failed,
+      cost_usd: cost.cost_usd,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    logger.error("tier2_trigger", `Tier 2 run failed: ${err.message}`);
+    res.status(500).json({
+      error: "Tier 2 failed",
+      message: err.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
 }
