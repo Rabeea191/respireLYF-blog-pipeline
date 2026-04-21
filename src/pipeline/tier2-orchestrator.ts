@@ -385,7 +385,11 @@ async function main() {
   process.exit(failed > 0 ? 1 : 0);
 }
 
-main().catch((err) => {
-  console.error("\n❌ Tier 2 fatal error:", err.message);
-  process.exit(1);
-});
+// Only run the CLI `main()` when invoked directly via `node tier2-orchestrator.js`.
+// When this module is imported by the Vercel serverless handler, skip it.
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("\n❌ Tier 2 fatal error:", err.message);
+    process.exit(1);
+  });
+}

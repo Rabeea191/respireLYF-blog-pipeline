@@ -206,16 +206,21 @@ function getWeekOf(): string {
   return monday.toISOString().split("T")[0];
 }
 
-// ─── Run directly ─────────────────────────────────────────────────────────────
-runTier1Pipeline()
-  .then((run) => {
-    console.log(`\n✅ Tier 1 complete — run ID: ${run.id}`);
-    console.log(`   Status: ${run.status}`);
-    console.log(`   Topics: ${run.topic_cards?.length ?? 0}`);
-    console.log(`\n   Check ClickUp — topics should appear in "Blog Topic Review" list!`);
-    process.exit(0);
-  })
-  .catch((err) => {
-    console.error("\n❌ Tier 1 failed:", err.message);
-    process.exit(1);
-  });
+// ─── Run directly (CLI only) ─────────────────────────────────────────────────
+// Only execute when invoked via `node tier1-orchestrator.js`, NOT when imported
+// by the Vercel serverless handler. Without this guard, the pipeline kicks off
+// at module load time on every function invocation.
+if (require.main === module) {
+  runTier1Pipeline()
+    .then((run) => {
+      console.log(`\n✅ Tier 1 complete — run ID: ${run.id}`);
+      console.log(`   Status: ${run.status}`);
+      console.log(`   Topics: ${run.topic_cards?.length ?? 0}`);
+      console.log(`\n   Check ClickUp — topics should appear in "Blog Topic Review" list!`);
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error("\n❌ Tier 1 failed:", err.message);
+      process.exit(1);
+    });
+}
