@@ -3,30 +3,16 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "src/api/cron-trigger.ts": {
+    "api/pipeline/trigger.ts": {
       "maxDuration": 60
     },
-    "src/api/clickup-webhook.ts": {
+    "api/pipeline/clickup-webhook.ts": {
       "maxDuration": 30
     },
-    "src/api/tier2-trigger.ts": {
+    "api/pipeline/tier2-trigger.ts": {
       "maxDuration": 60
     }
   },
-  "rewrites": [
-    {
-      "source": "/api/pipeline/trigger",
-      "destination": "/src/api/cron-trigger"
-    },
-    {
-      "source": "/api/pipeline/clickup-webhook",
-      "destination": "/src/api/clickup-webhook"
-    },
-    {
-      "source": "/api/pipeline/tier2-trigger",
-      "destination": "/src/api/tier2-trigger"
-    }
-  ],
   "crons": [
     {
       "path": "/api/pipeline/trigger",
