@@ -40,14 +40,10 @@ const SEED_QUERIES = [
 ];
 
 // ─── RSS feeds ────────────────────────────────────────────────────────────────
+// CDC feed (132608.rss) was removed — consistently 404s / hangs.
 const RSS_FEEDS: Array<{ url: string; source: TrendSource["name"] }> = [
   {
-    // CDC Healthy Living / Respiratory RSS
-    url: "https://tools.cdc.gov/api/v2/resources/media/132608.rss",
-    source: "rss_cdc",
-  },
-  {
-    // NHLBI press releases (updated URL)
+    // NHLBI press releases
     url: "https://www.nhlbi.nih.gov/news/press-releases",
     source: "rss_nhlbi",
   },
@@ -73,65 +69,73 @@ function detectSeasonalContext(): string | undefined {
 
 // ─── SerpAPI — Google Trends ──────────────────────────────────────────────────
 async function scrapeGoogleTrends(run_id: string): Promise<TrendSignal[]> {
-  const signals: TrendSignal[] = [];
   const seasonal = detectSeasonalContext();
 
   // Skip if no SerpAPI key — otherwise we hammer the endpoint with invalid calls
   // and eat the function's time budget before even reaching topic generation.
   if (!config.serpApi.key) {
     logger.warn("trend_scraper", "SERP_API_KEY not set — skipping Google Trends", { run_id });
-    return signals;
+    return [];
   }
 
-  for (const query of SEED_QUERIES) {
-    try {
-      const { data } = await axios.get("https://serpapi.com/search", {
-        params: {
-          engine: "google_trends",
-          q: query,
-          data_type: "RELATED_QUERIES",
-          api_key: config.serpApi.key,
-        },
-        timeout: 10000,
-      });
-
-      const rising: string[] =
-        data?.related_queries?.rising?.map((r: { query: string }) => r.query) ?? [];
-      const top: string[] =
-        data?.related_queries?.top?.map((r: { query: string }) => r.query) ?? [];
-
-      for (const q of rising.slice(0, 3)) {
-        signals.push({
-          id: randomUUID(),
-          raw_query: q,
-          source: { name: "google_trends" },
-          trend_direction: "rising",
-          patient_intent_flag: isPatientIntent(q),
-          seasonal_context_tag: seasonal,
-          scraped_at: new Date().toISOString(),
-          passed_gate: false,
+  // Fire all 12 seed queries in parallel — a sequential for-loop takes up to
+  // 12 × 10s = 2 minutes, which blows the serverless budget before topic
+  // generation even begins. In parallel, worst case is ~10s.
+  const querySignals = await Promise.all(
+    SEED_QUERIES.map(async (query) => {
+      try {
+        const { data } = await axios.get("https://serpapi.com/search", {
+          params: {
+            engine: "google_trends",
+            q: query,
+            data_type: "RELATED_QUERIES",
+            api_key: config.serpApi.key,
+          },
+          timeout: 8000,
         });
-      }
-      for (const q of top.slice(0, 2)) {
-        signals.push({
-          id: randomUUID(),
-          raw_query: q,
-          source: { name: "google_trends" },
-          trend_direction: "stable",
-          patient_intent_flag: isPatientIntent(q),
-          seasonal_context_tag: seasonal,
-          scraped_at: new Date().toISOString(),
-          passed_gate: false,
-        });
-      }
-    } catch (err) {
-      logger.warn("trend_scraper", `Google Trends failed for query: ${query}`, {
-        run_id,
-        data: { error: String(err) },
-      });
-    }
-  }
 
+        const rising: string[] =
+          data?.related_queries?.rising?.map((r: { query: string }) => r.query) ?? [];
+        const top: string[] =
+          data?.related_queries?.top?.map((r: { query: string }) => r.query) ?? [];
+
+        const out: TrendSignal[] = [];
+        for (const q of rising.slice(0, 3)) {
+          out.push({
+            id: randomUUID(),
+            raw_query: q,
+            source: { name: "google_trends" },
+            trend_direction: "rising",
+            patient_intent_flag: isPatientIntent(q),
+            seasonal_context_tag: seasonal,
+            scraped_at: new Date().toISOString(),
+            passed_gate: false,
+          });
+        }
+        for (const q of top.slice(0, 2)) {
+          out.push({
+            id: randomUUID(),
+            raw_query: q,
+            source: { name: "google_trends" },
+            trend_direction: "stable",
+            patient_intent_flag: isPatientIntent(q),
+            seasonal_context_tag: seasonal,
+            scraped_at: new Date().toISOString(),
+            passed_gate: false,
+          });
+        }
+        return out;
+      } catch (err) {
+        logger.warn("trend_scraper", `Google Trends failed for query: ${query}`, {
+          run_id,
+          data: { error: String(err) },
+        });
+        return [];
+      }
+    })
+  );
+
+  const signals = querySignals.flat();
   logger.info("trend_scraper", `Google Trends: ${signals.length} signals`, { run_id });
   return signals;
 }
