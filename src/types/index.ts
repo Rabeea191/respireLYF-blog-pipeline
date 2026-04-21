@@ -145,7 +145,11 @@ export interface SEOPackage {
   outbound_links: Array<{
     anchor_text: string;
     url: string;
-    source_org: "CDC" | "NIH" | "NHLBI" | "GINA" | "GOLD" | "FDA" | "AJRCCM" | "NEJM" | "JAMA" | "Chest" | "Lancet";
+    // Allowed orgs include CDC/NIH/NHLBI/GINA/GOLD/FDA/NEJM/JAMA/Chest/Lancet plus the
+    // authoritative domains we pre-curate in the SEO brief sheet (Cleveland Clinic,
+    // Mayo Clinic, NHS, Hopkins, AAAAI, AAFA, etc.). Kept as string to avoid brittle
+    // coupling to an enum that lags the list in pick-topic.js.
+    source_org: string;
   }>;
   ymyl_confirmed: boolean;
   researched_at: string;

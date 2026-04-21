@@ -1,25 +1,42 @@
 /**
- * ClickUp Webhook Handler
+ * ClickUp Webhook Handler — Source of Truth is ClickUp
  *
- * ClickUp fires a POST to this endpoint whenever a task status changes.
- * We look for our topic-review tasks and route the decision back into
- * the pipeline approval state machine.
+ * No database needed. The full TopicCard JSON lives inside each ClickUp
+ * task's description as a hidden fenced code block. That makes ClickUp
+ * the single source of truth for what is pending / approved / rejected.
+ *
+ * Events handled:
+ *   taskStatusUpdated  — when a human flips a topic task to Approved,
+ *                        we count approved topic tasks and, if we are at
+ *                        the threshold, fire the Tier 2 trigger endpoint.
+ *   taskCommentPosted  — when a human leaves notes on a task that is in
+ *                        "Approved - Needs Tweak" status, we run the
+ *                        Topic Refiner and auto-advance the task to
+ *                        Approved (which re-fires the status webhook).
  *
  * Deploy as: /api/pipeline/clickup-webhook
- * Register at: ClickUp Settings → Integrations → Webhooks → taskStatusUpdated
- *
- * Webhook events we handle:
- *   taskStatusUpdated — human changed the task status
- *   taskCommentPosted — human added notes (for "Approved with Notes" flow)
+ * Register at: ClickUp Settings → Integrations → Webhooks
+ *              events: taskStatusUpdated, taskCommentPosted
  */
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "crypto";
+import axios from "axios";
 import { config } from "../lib/config";
 import { logger } from "../lib/logger";
-import { db, getTopicCard, updateTopicCard, updatePipelineRun, getTopicsByRun } from "../lib/supabase";
 import { runTopicRefiner } from "../agents/topic-refiner";
-import type { ApprovalStatus } from "../types";
+import {
+  extractEmbeddedTopic,
+  buildEmbeddedTopicBlock,
+  TOPIC_BLOCK_OPEN,
+  TOPIC_BLOCK_CLOSE,
+} from "../lib/topic-embed";
+import type { TopicCard } from "../types";
+
+const CLICKUP_BASE = "https://api.clickup.com/api/v2";
+
+// Re-export for any external callers that still reference this module.
+export { extractEmbeddedTopic };
 
 // ─── Verify ClickUp webhook signature ────────────────────────────────────────
 function verifySignature(req: NextApiRequest, rawBody: string): boolean {
@@ -30,27 +47,114 @@ function verifySignature(req: NextApiRequest, rawBody: string): boolean {
     .createHmac("sha256", config.clickup.webhookSecret)
     .update(rawBody)
     .digest("hex");
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
 }
 
-// ─── Map ClickUp status → pipeline ApprovalStatus ────────────────────────────
-function mapStatus(clickupStatus: string): ApprovalStatus | null {
-  const lower = clickupStatus.toLowerCase().trim();
-  const statuses = config.clickup.statuses;
+// ─── ClickUp API helpers ─────────────────────────────────────────────────────
+const headers = {
+  Authorization: config.clickup.apiKey,
+  "Content-Type": "application/json",
+};
 
-  if (lower === statuses.approved.toLowerCase())           return "approved";
-  if (lower === statuses.approvedWithNotes.toLowerCase())  return "approved_with_notes";
-  if (lower === statuses.rejected.toLowerCase())           return "rejected";
-  return null; // Unknown status — ignore
+interface ClickUpTask {
+  id: string;
+  status: { status: string };
+  description?: string;
+  text_content?: string;
 }
 
-// ─── Main handler ─────────────────────────────────────────────────────────────
+async function fetchListTasks(): Promise<ClickUpTask[]> {
+  // ClickUp caps at 100 tasks per page — for a weekly 5-topic list we're fine.
+  const { data } = await axios.get(
+    `${CLICKUP_BASE}/list/${config.clickup.listId}/task`,
+    {
+      headers,
+      params: { include_closed: false, subtasks: false, page: 0 },
+      timeout: 15_000,
+    }
+  );
+  return (data?.tasks ?? []) as ClickUpTask[];
+}
+
+async function fetchTask(taskId: string): Promise<ClickUpTask | null> {
+  try {
+    const { data } = await axios.get(`${CLICKUP_BASE}/task/${taskId}`, {
+      headers,
+      timeout: 10_000,
+    });
+    return data as ClickUpTask;
+  } catch (err: any) {
+    logger.warn("clickup_webhook", `Failed to fetch task ${taskId}: ${err.message}`);
+    return null;
+  }
+}
+
+async function updateTask(
+  taskId: string,
+  updates: { description?: string; status?: string }
+): Promise<void> {
+  await axios.put(`${CLICKUP_BASE}/task/${taskId}`, updates, { headers });
+}
+
+/** Count pipeline tasks whose ClickUp status is Approved. */
+async function countApprovedPipelineTasks(): Promise<number> {
+  const tasks = await fetchListTasks();
+  const approvedLower = config.clickup.statuses.approved.toLowerCase();
+  let count = 0;
+  for (const t of tasks) {
+    const status = (t.status?.status ?? "").toLowerCase();
+    if (status !== approvedLower) continue;
+    // Only count tasks with our embedded topic JSON (ignore ad-hoc tasks)
+    if (!extractEmbeddedTopic(t.description ?? t.text_content ?? "")) continue;
+    count++;
+  }
+  return count;
+}
+
+/** Fire the Tier 2 trigger endpoint (fire-and-forget). */
+async function fireTier2Trigger(): Promise<void> {
+  const baseUrl = resolveBaseUrl();
+  const url = `${baseUrl}/api/pipeline/tier2-trigger`;
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    logger.error("clickup_webhook", "CRON_SECRET missing — cannot fire Tier 2 trigger");
+    return;
+  }
+
+  logger.info("clickup_webhook", `Firing Tier 2 trigger → ${url}`);
+  try {
+    // Short timeout because Tier 2 runs long — the endpoint responds 202
+    // immediately and runs the pipeline async.
+    await axios.post(url, {}, {
+      headers: { Authorization: `Bearer ${cronSecret}` },
+      timeout: 10_000,
+    });
+  } catch (err: any) {
+    // If it 202s fast, we'll be fine. If it errors, log it.
+    if (err?.response?.status === 202 || err?.response?.status === 200) return;
+    logger.warn(
+      "clickup_webhook",
+      `Tier 2 trigger call returned unexpected result: ${err?.response?.status ?? err.message}`
+    );
+  }
+}
+
+function resolveBaseUrl(): string {
+  if (process.env.PIPELINE_BASE_URL) return process.env.PIPELINE_BASE_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
+
+// ─── Main handler ────────────────────────────────────────────────────────────
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Verify signature
   const rawBody = JSON.stringify(req.body);
   if (!verifySignature(req, rawBody)) {
     logger.warn("clickup_webhook", "Invalid webhook signature — rejected");
@@ -60,7 +164,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { event, task_id, history_items } = req.body as {
     event: string;
     task_id: string;
-    history_items?: Array<{ field: string; after?: { status: string }; comment?: { text_content: string } }>;
+    history_items?: Array<{
+      field: string;
+      after?: { status: string };
+      comment?: { text_content: string };
+    }>;
   };
 
   // Acknowledge immediately — ClickUp expects 200 within 5s
@@ -71,6 +179,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await handleStatusUpdate(task_id, history_items ?? []);
     } else if (event === "taskCommentPosted") {
       await handleCommentPosted(task_id, history_items ?? []);
+    } else {
+      logger.debug("clickup_webhook", `Ignoring event: ${event}`);
     }
   } catch (err) {
     logger.error("clickup_webhook", `Error processing webhook event: ${event}`, {
@@ -79,136 +189,118 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 }
 
-// ─── Status change handler ────────────────────────────────────────────────────
+// ─── Status change handler ───────────────────────────────────────────────────
 async function handleStatusUpdate(
   clickupTaskId: string,
   historyItems: Array<{ field: string; after?: { status: string } }>
 ) {
-  // Find the status change item
   const statusItem = historyItems.find((h) => h.field === "status");
   if (!statusItem?.after?.status) return;
 
-  const newStatus = statusItem.after.status;
-  const approvalStatus = mapStatus(newStatus);
-  if (!approvalStatus) {
-    logger.debug("clickup_webhook", `Ignoring status change to "${newStatus}" — not an approval status`);
+  const newStatus = statusItem.after.status.toLowerCase();
+  const approvedLower = config.clickup.statuses.approved.toLowerCase();
+
+  // We only care about transitions into Approved for the threshold check.
+  if (newStatus !== approvedLower) {
+    logger.debug("clickup_webhook", `Ignoring status change to "${newStatus}"`);
     return;
   }
 
-  // Find the topic card by ClickUp task ID
-  const { data: cards } = await db
-    .from("topic_cards")
-    .select("*")
-    .eq("clickup_task_id", clickupTaskId)
-    .limit(1);
-
-  if (!cards || cards.length === 0) {
-    logger.warn("clickup_webhook", `No topic card found for ClickUp task ${clickupTaskId}`);
+  // Confirm this is one of our pipeline topic tasks (has embedded JSON)
+  const task = await fetchTask(clickupTaskId);
+  const topic = extractEmbeddedTopic(task?.description ?? task?.text_content ?? "");
+  if (!topic) {
+    logger.debug("clickup_webhook", `Task ${clickupTaskId} has no embedded topic — ignoring`);
     return;
   }
 
-  const card = cards[0];
-  logger.info("clickup_webhook", `Topic "${card.title}" → ${approvalStatus}`, {
+  logger.info("clickup_webhook", `Topic "${topic.title}" → Approved`, {
     data: { clickup_task_id: clickupTaskId },
   });
 
-  // Update the topic card
-  await updateTopicCard(card.id, {
-    approval_status: approvalStatus,
-  });
+  const approvedCount = await countApprovedPipelineTasks();
+  const threshold = config.pipeline.approvalThreshold;
+  logger.info(
+    "clickup_webhook",
+    `Approval progress: ${approvedCount}/${threshold}`,
+  );
 
-  // If approved (no notes needed), check if we've hit the threshold
-  if (approvalStatus === "approved") {
-    await checkApprovalThreshold(card.pipeline_run_id);
-  }
-
-  // If rejected, trigger regeneration
-  if (approvalStatus === "rejected") {
-    await triggerTopicRegeneration(card.pipeline_run_id, card.id);
+  if (approvedCount >= threshold) {
+    logger.info("clickup_webhook", `Threshold reached — firing Tier 2 trigger`);
+    await fireTier2Trigger();
   }
 }
 
-// ─── Comment posted handler (captures human notes for "approved with notes") ──
+// ─── Comment posted handler (for "Approved - Needs Tweak") ───────────────────
 async function handleCommentPosted(
   clickupTaskId: string,
   historyItems: Array<{ comment?: { text_content: string } }>
 ) {
   const commentItem = historyItems.find((h) => h.comment?.text_content);
   if (!commentItem?.comment?.text_content) return;
-
   const humanNotes = commentItem.comment.text_content;
 
-  // Find the topic card
-  const { data: cards } = await db
-    .from("topic_cards")
-    .select("*")
-    .eq("clickup_task_id", clickupTaskId)
-    .limit(1);
+  const task = await fetchTask(clickupTaskId);
+  if (!task) return;
 
-  if (!cards || cards.length === 0) return;
+  const currentStatus = (task.status?.status ?? "").toLowerCase();
+  const needsTweakLower = config.clickup.statuses.approvedWithNotes.toLowerCase();
+  if (currentStatus !== needsTweakLower) {
+    // Comments on other statuses are just review notes — ignore.
+    return;
+  }
 
-  const card = cards[0];
+  const topic = extractEmbeddedTopic(task.description ?? task.text_content ?? "");
+  if (!topic) {
+    logger.warn(
+      "clickup_webhook",
+      `Task ${clickupTaskId} in "${currentStatus}" has no embedded topic — cannot refine`,
+    );
+    return;
+  }
 
-  // Only process if status is "approved_with_notes"
-  if (card.approval_status !== "approved_with_notes") return;
-
-  logger.info("clickup_webhook", `Running Topic Refiner for "${card.title}"`, {
+  logger.info("clickup_webhook", `Refining "${topic.title}" with human notes`, {
     data: { human_notes: humanNotes },
   });
 
-  // Run refiner with human notes
-  const refined = await runTopicRefiner(card, humanNotes, card.pipeline_run_id);
+  const refined = await runTopicRefiner(
+    topic,
+    humanNotes,
+    topic.pipeline_run_id || "ad-hoc",
+  );
 
-  // Save refined card
-  await updateTopicCard(card.id, {
-    title:              refined.title,
-    primary_keyword:    refined.primary_keyword,
-    rationale:          refined.rationale,
-    respireLYF_feature: refined.respireLYF_feature,
-    human_notes:        humanNotes,
-    refined_at:         refined.refined_at,
-    iteration_count:    refined.iteration_count,
-    // Mark as fully approved after refinement
-    approval_status:    "approved",
+  const newDescription = buildRefinedDescription(refined, humanNotes);
+
+  await updateTask(clickupTaskId, {
+    description: newDescription,
+    status: config.clickup.statuses.approved, // auto-advance → fires another webhook
   });
 
-  // Check threshold after successful refinement
-  await checkApprovalThreshold(card.pipeline_run_id);
+  logger.info(
+    "clickup_webhook",
+    `Task auto-advanced to Approved after refinement`,
+  );
 }
 
-// ─── Check if we've hit the approval threshold ────────────────────────────────
-async function checkApprovalThreshold(runId: string) {
-  const allCards = await getTopicsByRun(runId);
-  const approvedCount = allCards.filter(
-    (c) => c.approval_status === "approved"
-  ).length;
+function buildRefinedDescription(card: TopicCard, humanNotes: string): string {
+  const header = `## 🔄 Topic refined based on your notes
 
-  logger.info("clickup_webhook", `Approval progress: ${approvedCount}/${config.pipeline.approvalThreshold}`, {
-    run_id: runId,
-  });
+**Refined title:** ${card.title}
+**Primary keyword:** ${card.primary_keyword}
+**Feature:** ${card.respireLYF_feature}
 
-  await updatePipelineRun(runId, { approved_count: approvedCount });
+**Updated rationale**
+${card.rationale}
 
-  if (approvedCount >= config.pipeline.approvalThreshold) {
-    logger.info("clickup_webhook", `Threshold reached! Advancing pipeline to Tier 2`, { run_id: runId });
-    await updatePipelineRun(runId, {
-      status: "approved",
-      current_stage: "seo_research",
-    });
-    // Tier 2 orchestrator picks up from here (polls for status === "approved")
-  }
-}
+---
 
-// ─── Trigger regeneration for a rejected topic ────────────────────────────────
-async function triggerTopicRegeneration(runId: string, rejectedCardId: string) {
-  logger.info("clickup_webhook", `Queuing topic regeneration for run ${runId}`, {
-    data: { rejected_card_id: rejectedCardId },
-  });
+### Your notes
+> ${humanNotes.replace(/\n/g, "\n> ")}
 
-  // Mark the run as needing regeneration
-  await updatePipelineRun(runId, {
-    status: "running",
-    current_stage: "topic_generation",
-  });
-  // The Tier 1 orchestrator polling loop will pick this up and re-run generation
+---
+
+_This task has been auto-advanced to **Approved**. Flip back to Rejected if the refinement misses the mark._
+`;
+
+  return header + buildEmbeddedTopicBlock(card);
 }

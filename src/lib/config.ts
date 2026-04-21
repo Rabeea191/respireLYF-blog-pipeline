@@ -54,6 +54,13 @@ export const config = {
     password: optional_env("PAYLOAD_PASSWORD", ""),
   },
 
+  nanoBanana: {
+    // NanoBananaAPI.ai (Gemini 2.5 Flash Image) — optional. If unset,
+    // Tier 2 skips image generation and posts the draft without images.
+    apiKey:  optional_env("NANO_BANANA_API_KEY"),
+    baseUrl: optional_env("NANO_BANANA_BASE_URL", "https://api.nanobananaapi.ai/api/v1/nanobanana"),
+  },
+
   pipeline: {
     approvalThreshold: parseInt(optional_env("APPROVAL_THRESHOLD", "3"), 10),
     maxTopicRetries:   parseInt(optional_env("MAX_TOPIC_RETRIES",  "3"), 10),

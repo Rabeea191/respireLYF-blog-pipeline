@@ -11,6 +11,7 @@
 import fs from "fs";
 import path from "path";
 import { logger } from "../lib/logger";
+import { runImagePipeline, type GeneratedImage } from "../lib/image-pipeline";
 import type { BlogDraft, ContentBrief, AgentResult } from "../types";
 
 // ─── Payload config (read lazily so dotenv has time to load) ──────────────
@@ -167,9 +168,17 @@ function markdownToLexical(body: string, images: ImageInput[]): object {
     const imageMatch = trim.match(/^<!--\s*IMAGE:\s*(\w+)\s*-->$/);
     if (imageMatch) {
       const placement = imageMatch[1];
+      // Hero is surfaced as `featuredImage` on the post record — skip it in
+      // the body so it doesn't render twice on the detail page.
+      if (placement === "hero") {
+        // Still consume from the queue so later hero-placed images don't
+        // accidentally bleed into non-hero slots.
+        consumeImage(placement);
+        i++; continue;
+      }
       const img = consumeImage(placement);
       if (img) {
-        if (placement === "hero" || placement === "cta") {
+        if (placement === "cta") {
           nodes.push(heroParagraphNode(img.mediaId));
         } else {
           const layout = img.layout ?? (inlineImageCount % 2 === 0 ? "left" : "right");
@@ -250,16 +259,21 @@ async function createDraft(
   token: string,
   meta: Record<string, string>,
   content: object,
-  brief: ContentBrief
+  brief: ContentBrief,
+  extras: {
+    featuredImageId?: string;
+    featuredImageAlt?: string;
+    readTime?: number;
+  } = {},
 ): Promise<{ id: string; adminUrl: string }> {
   const slug = meta["slug"] ?? brief.yaml_frontmatter.slug;
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     title:         meta["meta_title"]         ?? brief.yaml_frontmatter.meta_title,
     slug,
     content,
+    // Always post as a draft so a human reviews in Payload before publish.
     _status:       "draft",
-    publishedDate: new Date().toISOString(),
     excerpt:       meta["meta_description"]   ?? brief.yaml_frontmatter.meta_description,
     seo: {
       metaTitle:       meta["meta_title"]       ?? brief.yaml_frontmatter.meta_title,
@@ -268,16 +282,25 @@ async function createDraft(
       secondaryKeywords: brief.yaml_frontmatter.secondary_keywords.join(", "),
     },
   };
+  if (extras.featuredImageId)  payload.featuredImage    = extras.featuredImageId;
+  if (extras.featuredImageAlt) payload.featuredImageAlt = extras.featuredImageAlt;
+  if (typeof extras.readTime === "number" && extras.readTime > 0) {
+    payload.readTime = extras.readTime;
+  }
 
   const { url: PAYLOAD_URL } = getPayloadConfig();
-  const res = await fetch(`${PAYLOAD_URL}/api/blog?depth=0&fallback-locale=null`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `JWT ${token}`,
+  // ?draft=true tells Payload's Drafts plugin to store this as a draft version.
+  const res = await fetch(
+    `${PAYLOAD_URL}/api/blog?depth=0&fallback-locale=null&draft=true`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `JWT ${token}`,
+      },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
+  );
 
   const result = await res.json() as any;
 
@@ -291,11 +314,25 @@ async function createDraft(
   };
 }
 
+// Approximate reading time at a typical 225 wpm blog pace (min 1 min).
+function estimateReadTime(markdown: string): number {
+  const words = markdown
+    .replace(/^---[\s\S]+?---\n/, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/#{1,6}\s/g, "")
+    .replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return Math.max(1, Math.ceil(words / 225));
+}
+
 // ─── Main export ───────────────────────────────────────────────────────────
 export async function runPayloadPoster(
   draft: BlogDraft,
   brief: ContentBrief,
-  images: ImageInput[] = []
+  prebuiltImages: ImageInput[] = []
 ): Promise<AgentResult<{ payloadId: string; adminUrl: string; slug: string }>> {
   const start = Date.now();
 
@@ -310,9 +347,8 @@ export async function runPayloadPoster(
       };
     }
 
-    // Parse markdown
+    // Parse markdown first so we can feed the body to the image pipeline.
     const { meta, body } = parseFrontmatter(draft.markdown_content);
-    const content = markdownToLexical(body, images);
 
     // Authenticate
     let token: string;
@@ -327,11 +363,49 @@ export async function runPayloadPoster(
       };
     }
 
+    // ── Generate images inline (NanoBanana → Payload Media) ──────────────
+    // Caller-provided images take priority; otherwise we extract IMAGE
+    // markers from the blog body and generate them now. Failures are
+    // non-fatal — the draft still posts without the failing image.
+    let images: ImageInput[] = prebuiltImages;
+    if (images.length === 0) {
+      try {
+        const generated: GeneratedImage[] = await runImagePipeline(token, body);
+        images = generated.map((g) => ({
+          placement: g.placement,
+          mediaId: g.mediaId,
+          layout: g.layout,
+        }));
+      } catch (err: any) {
+        logger.warn(
+          "payload-poster",
+          `Image pipeline threw: ${err.message} — posting draft without images`,
+        );
+      }
+    }
+
+    // Build Lexical AFTER images are known so mediaIds slot into the tree.
+    const content = markdownToLexical(body, images);
+
+    // Hero image → featuredImage on the post (skipped in body by markdownToLexical).
+    const hero = images.find((img) => img.placement === "hero");
+    const heroAlt =
+      (prebuiltImages.find((i) => i.placement === "hero") as any)?.alt ??
+      meta["meta_title"] ??
+      brief.h1;
+
     // Create draft
     try {
-      const { id, adminUrl } = await createDraft(token, meta, content, brief);
+      const { id, adminUrl } = await createDraft(token, meta, content, brief, {
+        featuredImageId: hero?.mediaId,
+        featuredImageAlt: hero?.mediaId ? String(heroAlt) : undefined,
+        readTime: estimateReadTime(draft.markdown_content),
+      });
 
-      logger.info("payload-poster", `✅ Draft created: ${adminUrl}`);
+      logger.info(
+        "payload-poster",
+        `✅ Draft created: ${adminUrl} (${images.length} image${images.length === 1 ? "" : "s"})`,
+      );
 
       return {
         success: true,

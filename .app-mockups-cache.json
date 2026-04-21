@@ -1,0 +1,20 @@
+{
+  "today": {
+    "mediaId": "69e2010299a014ebab6dd1df",
+    "url": "https://www.respirelyf.com/api/media/file/mockup-today-mobiletoday-screen.webp",
+    "fileHash": 102715,
+    "uploadedAt": "2026-04-17T09:41:23.603Z"
+  },
+  "cough": {
+    "mediaId": "69e2010699a014ebab6dd1e6",
+    "url": "https://www.respirelyf.com/api/media/file/mockup-cough-iphone_cough_screen.webp",
+    "fileHash": 548597,
+    "uploadedAt": "2026-04-17T09:41:26.790Z"
+  },
+  "ecosystem": {
+    "mediaId": "69e2010899a014ebab6dd1ed",
+    "url": "https://www.respirelyf.com/api/media/file/mockup-ecosystem-onetap_screen.webp",
+    "fileHash": 290464,
+    "uploadedAt": "2026-04-17T09:41:28.775Z"
+  }
+}

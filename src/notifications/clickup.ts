@@ -22,6 +22,7 @@
 import axios from "axios";
 import { config } from "../lib/config";
 import { logger } from "../lib/logger";
+import { buildEmbeddedTopicBlock } from "../lib/topic-embed";
 import type { TopicCard, PipelineRun } from "../types";
 
 const CLICKUP_BASE = "https://api.clickup.com/api/v2";
@@ -30,6 +31,14 @@ const headers = {
   Authorization: config.clickup.apiKey,
   "Content-Type": "application/json",
 };
+
+/** Stamp the pipeline run id into the card before we embed it. */
+function embedTopicForTask(card: TopicCard, run: PipelineRun): string {
+  return buildEmbeddedTopicBlock({
+    ...card,
+    pipeline_run_id: card.pipeline_run_id || run.id,
+  });
+}
 
 // ─── Priority mapping ─────────────────────────────────────────────────────────
 function getPriority(flag: string): number {
@@ -103,9 +112,13 @@ export async function createTopicTask(
 
   const flag = card.evaluation?.gate_flag ?? "pending";
 
+  // Human-readable description + hidden JSON block for machine rehydration.
+  // The webhook and Tier 2 trigger read the JSON block via extractEmbeddedTopic().
+  const description = buildDescription(card, run) + embedTopicForTask(card, run);
+
   const payload = {
     name: `[Week of ${weekOf}] ${card.title}`,
-    description: buildDescription(card, run),
+    description,
     status: config.clickup.statuses.pending,
     priority: getPriority(flag),
     tags: ["topic-review", `week-${run.week_of}`, `gate-${flag}`],

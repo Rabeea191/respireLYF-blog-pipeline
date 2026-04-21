@@ -24,6 +24,7 @@ import { runPayloadPoster }  from "../agents/payload-poster";
 import { logger }            from "../lib/logger";
 import { config }            from "../lib/config";
 import { resetTokenStats, getTokenStats } from "../lib/claude";
+import { extractEmbeddedTopic } from "../lib/topic-embed";
 import * as fs               from "fs";
 import * as path             from "path";
 import type {
@@ -33,6 +34,8 @@ import type {
   BlogDraft,
   PipelineStageLog,
 } from "../types";
+
+const CLICKUP_BASE = "https://api.clickup.com/api/v2";
 
 const MAX_WRITE_ITERATIONS = 3;
 
@@ -201,54 +204,68 @@ async function processTopic(topic: TopicCard): Promise<Tier2Result> {
   };
 }
 
-// ─── Fetch approved topic IDs from ClickUp ───────────────────────────────
-async function getApprovedTopicsFromClickUp(): Promise<TopicCard[]> {
-  // Load local topics from store
-  const dataDir = path.join(process.cwd(), "pipeline-data");
-  const topicsFile = path.join(dataDir, "latest-topics.json");
+// ─── Load approved topics directly from ClickUp ──────────────────────────
+/**
+ * Fetches every task in the pipeline list, keeps only those whose status
+ * is Approved, parses the embedded TopicCard JSON from each task's
+ * description, and returns the rehydrated TopicCards.
+ *
+ * ClickUp is the single source of truth for topic state — no local JSON
+ * file is required. This lets the Vercel serverless environment (where
+ * the filesystem is ephemeral) run Tier 2 reliably.
+ */
+export async function loadApprovedTopicsFromClickUp(): Promise<TopicCard[]> {
+  const { data } = await axios.get(
+    `${CLICKUP_BASE}/list/${config.clickup.listId}/task`,
+    {
+      headers: { Authorization: config.clickup.apiKey },
+      params: { include_closed: false, subtasks: false, page: 0 },
+      timeout: 15_000,
+    },
+  );
 
-  if (!fs.existsSync(topicsFile)) {
-    throw new Error("No topics found — run `npm run tier1` first");
-  }
+  const tasks: Array<{
+    id: string;
+    status?: { status: string };
+    description?: string;
+    text_content?: string;
+  }> = data?.tasks ?? [];
 
-  const allTopics: TopicCard[] = JSON.parse(fs.readFileSync(topicsFile, "utf-8"));
-  logger.info("tier2", `Loaded ${allTopics.length} topics from local store`);
+  logger.info("tier2", `Fetched ${tasks.length} tasks from ClickUp list`);
 
-  const approvedTopics: TopicCard[] = [];
-  const approvedStatusLower = config.clickup.statuses.approved.toLowerCase();
-  const approvedNotesLower  = config.clickup.statuses.approvedWithNotes.toLowerCase();
+  const approvedLower = config.clickup.statuses.approved.toLowerCase();
+  const notesLower    = config.clickup.statuses.approvedWithNotes.toLowerCase();
 
-  for (const topic of allTopics) {
-    if (!topic.clickup_task_id) {
-      logger.warn("tier2", `Topic "${topic.title}" has no ClickUp task ID — skipping`);
+  const approved: TopicCard[] = [];
+  for (const task of tasks) {
+    const status = (task.status?.status ?? "").toLowerCase();
+    // Only Approved topics run Tier 2. "Approved - Needs Tweak" tasks are
+    // handled by the webhook's refiner which auto-advances them to Approved.
+    if (status !== approvedLower && status !== notesLower) continue;
+
+    const topic = extractEmbeddedTopic(task.description ?? task.text_content ?? "");
+    if (!topic) {
+      logger.warn(
+        "tier2",
+        `Task ${task.id} is Approved but has no embedded topic JSON — skipping`,
+      );
       continue;
     }
 
-    try {
-      const { data } = await axios.get(
-        `https://api.clickup.com/api/v2/task/${topic.clickup_task_id}`,
-        {
-          headers: { Authorization: config.clickup.apiKey },
-          timeout: 10_000,
-        }
-      );
-
-      const status: string = (data?.status?.status ?? "").toLowerCase();
-      logger.info("tier2", `"${topic.title}" → ClickUp status: "${status}"`);
-
-      if (status.includes("approved") || status === approvedStatusLower || status === approvedNotesLower) {
-        approvedTopics.push({
-          ...topic,
-          approval_status: status.includes("notes") ? "approved_with_notes" : "approved",
-          human_notes: data?.description ?? topic.human_notes,
-        });
-      }
-    } catch (err: any) {
-      logger.warn("tier2", `Could not fetch ClickUp task ${topic.clickup_task_id}: ${err.message}`);
-    }
+    approved.push({
+      ...topic,
+      clickup_task_id: task.id,
+      approval_status: status === notesLower ? "approved_with_notes" : "approved",
+    });
   }
 
-  return approvedTopics;
+  logger.info("tier2", `Loaded ${approved.length} approved topic(s) from ClickUp`);
+  return approved;
+}
+
+// Backwards-compat alias for CLI callers that used the old name.
+async function getApprovedTopicsFromClickUp(): Promise<TopicCard[]> {
+  return loadApprovedTopicsFromClickUp();
 }
 
 // ─── Run Tier 2 for all approved topics ───────────────────────────────────

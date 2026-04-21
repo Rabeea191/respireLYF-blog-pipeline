@@ -51,13 +51,46 @@ BRAND CONTEXT:
 - Target audience: US adults with asthma or COPD, frustrated by guessing why their breathing fluctuates
 
 TOPIC GENERATION RULES:
-1. Title must be under 60 characters — patient-language, keyword-heavy, no brand fluff
-2. Primary keyword must be an exact phrase a patient would Google (never internal brand vocab like "multi-determinant tracking" or "respiratory intelligence")
-3. Each topic must map to exactly ONE RespireLYF feature (see feature list below)
-4. No two topics can target the same primary keyword or feature
-5. YMYL flag = true for any topic covering symptoms, flares, worsening conditions, or anything involving clinical thresholds
-6. Rationale must name the specific trend signal that inspired it + why this week
-7. Topics must be clearly distinct from each other in angle and audience pain point
+1. Title must be under 60 characters, patient-language, keyword-heavy, no brand fluff.
+2. Primary keyword must be an exact phrase a patient would Google (never internal brand vocab like "multi-determinant tracking" or "respiratory intelligence").
+3. Each topic must map to exactly ONE RespireLYF feature (see feature list below).
+4. No two topics can target the same primary keyword or feature.
+5. YMYL flag = true for any topic covering symptoms, flares, worsening conditions, or anything involving clinical thresholds.
+6. Rationale must name the specific trend signal that inspired it + why this week.
+7. Topics must be clearly distinct from each other in angle and audience pain point.
+
+══════════════════════════════════════════
+TITLE PSYCHOLOGY (apply to every title you generate)
+══════════════════════════════════════════
+A good title earns the click AND ranks. Use one of these patterns, whichever fits the topic best:
+
+• Curiosity gap — hint at an answer without giving it away.
+  ✗ "Foods That Trigger Asthma"
+  ✓ "The 7 Foods That Could Be Triggering Your Asthma"
+
+• Pattern interrupt / counter-intuitive claim — challenge what the reader assumes.
+  ✗ "Why Cold Air Makes Asthma Worse"
+  ✓ "Why Warm Rooms Can Make Your Asthma Worse Than Cold Air"
+
+• Specific number + promise — concrete beats generic. Use odd numbers (3, 5, 7) where honest.
+  ✗ "How to Track Peak Flow"
+  ✓ "5 Peak Flow Readings That Mean You Should Call Your Doctor"
+
+• Problem + targeted audience — name the exact frustration and who it's for.
+  ✗ "Asthma and Sleep"
+  ✓ "Why Asthma Wakes You at 4 AM (And How to Stop It)"
+
+• Question the reader is already asking — mirror the search query verbatim.
+  ✗ "Cardiac Cough Guide"
+  ✓ "Is This Cardiac Cough? 6 Signs To Watch For"
+
+PSYCHOLOGY RULES:
+- Trigger curiosity without clickbait. Never promise what the article can't deliver.
+- Be specific. "Quick tips" is dead; "3 inhaler mistakes 70% of patients make" is alive.
+- Use the reader's exact frustration, not a clinical summary.
+- Parentheticals are powerful: "(And How to Fix It)", "(Without Meds)", "(Backed by Cleveland Clinic)".
+- Keep the primary keyword in the first 45 characters for SEO, but build curiosity in the last 15.
+- Never use em-dashes (—) or en-dashes (–) in titles. Use a colon, comma, or parenthesis instead.
 
 BANNED WORDS (never appear in title or rationale): journey, empower, transform, game-changer, revolutionary, unlock
 

@@ -1,0 +1,21 @@
+{
+  "_comment": "RespireLYF app mockups used as reference images for NanoBanana IMAGETOIAMGE mode. Each mockup is uploaded to Payload Media on first run; URLs are cached in .app-mockups-cache.json. Keywords drive topic-based auto-selection for CTA images.",
+  "default": "today",
+  "mockups": {
+    "today": {
+      "path": "../RespireLYF-Website-Live-tm-wajid/public/icons/mobiletoday-screen.png",
+      "description": "RespireLYF Today tab — the main daily logging screen showing Health Indicators (Vitals, Cough Tracker, Breathing Score, Peak Flow, Asthma Check-In) and Health Determinants in a clean card grid. Features the MD-RIC AI avatar and Apple Watch status in the header.",
+      "keywords": ["general", "daily", "tracking", "log", "routine", "symptoms", "breathing", "overview", "home"]
+    },
+    "cough": {
+      "path": "../RespireLYF-Website-Live-tm-wajid/public/images/iphone_cough_screen.png",
+      "description": "RespireLYF Cough Tracker screen — a clean iPhone screen with a large circular blue microphone button, real-time cough count, and elapsed tracking time. Showcases the passive on-device cough detection feature.",
+      "keywords": ["cough", "coughing", "audio", "passive", "tracking", "ML", "machine learning"]
+    },
+    "ecosystem": {
+      "path": "../RespireLYF-Website-Live-tm-wajid/public/images/onetap_screen.png",
+      "description": "RespireLYF product hero shot — iPhone showing the Today tab with cough tracking callouts, alongside an Apple Watch displaying active cough tracking session. The full iPhone + Apple Watch ecosystem view.",
+      "keywords": ["apple watch", "ecosystem", "wearable", "integration", "product"]
+    }
+  }
+}

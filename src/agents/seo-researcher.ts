@@ -17,6 +17,12 @@ import axios from "axios";
 import { callClaudeJSON } from "../lib/claude";
 import { config } from "../lib/config";
 import { logger } from "../lib/logger";
+import {
+  loadTopicBriefForKeyword,
+  loadTopicBriefBySlug,
+  mergeOutboundLinks,
+  slugify,
+} from "../lib/topic-brief";
 import type { TopicCard, SEOPackage, AgentResult } from "../types";
 import { randomUUID } from "crypto";
 
@@ -154,6 +160,20 @@ export async function runSEOResearcher(
   const start = Date.now();
 
   return logger.timed("seo-researcher", `Researching "${topic.title}"`, async () => {
+    // Step 0: look up a pre-curated topic brief from the SEO sheet (written by
+    // `node pick-topic.js --write "<keyword>"`). If present we use its real
+    // search metrics + authoritative URLs instead of having Claude invent them.
+    const brief =
+      loadTopicBriefForKeyword(topic.primary_keyword) ||
+      loadTopicBriefBySlug(slugify(topic.title));
+
+    if (brief) {
+      logger.info(
+        "seo-researcher",
+        `📎 Topic brief loaded from ${brief.rawPath} — vol=${brief.volume}, KD=${brief.keywordDifficulty}, ${brief.trustedSources.length} authoritative sources`
+      );
+    }
+
     // Step 1: fetch competitor URLs from SerpAPI
     const competitorUrls = await fetchCompetitorUrls(topic.primary_keyword);
     logger.info("seo-researcher", `Found ${competitorUrls.length} competitor URLs`);
@@ -178,6 +198,7 @@ export async function runSEOResearcher(
       // Non-fatal — log and continue with what we have
     }
 
+    // Build the initial SEO package from Claude's output (pre-brief merge).
     const seoPackage: SEOPackage = {
       topic_id: topic.id,
       primary_keyword: raw.primary_keyword ?? topic.primary_keyword,
@@ -191,7 +212,47 @@ export async function runSEOResearcher(
       researched_at: new Date().toISOString(),
     };
 
-    logger.info("seo-researcher", `SEO package ready — ${seoPackage.secondary_keywords.length} secondary keywords, ${seoPackage.suggested_h2_outline.length} H2s`);
+    // Step 4: if a topic brief exists, override with its vetted data.
+    // The brief carries: (a) the canonical primary keyword from the SEO sheet,
+    // (b) a pre-curated list of authoritative URLs, and (c) a real KD estimate.
+    if (brief) {
+      // Primary keyword — prefer the brief (matches what ranked in the CSV).
+      if (brief.primaryKeyword) seoPackage.primary_keyword = brief.primaryKeyword;
+
+      // Keyword difficulty — map the numeric KD to the low/medium/high bucket.
+      if (brief.keywordDifficulty > 0) {
+        seoPackage.keyword_difficulty_estimate =
+          brief.keywordDifficulty < 30 ? "low" :
+          brief.keywordDifficulty < 50 ? "medium" : "high";
+      }
+
+      // Outbound links — prepend brief's hand-curated authoritative sources.
+      // mergeOutboundLinks keeps Claude-suggested authoritative URLs too, so we
+      // retain the breadth while anchoring on the vetted ones.
+      const merged = mergeOutboundLinks(
+        seoPackage.outbound_links as any,
+        brief,
+        4
+      );
+      if (merged.length > 0) {
+        seoPackage.outbound_links = merged as any;
+        logger.info(
+          "seo-researcher",
+          `🔗 Outbound links: ${merged.length} total (${brief.trustedSources.length} from brief, rest from Claude)`
+        );
+      }
+
+      // Competitor URLs — if Claude returned none, seed from the brief's
+      // content references so the gap-analysis isn't empty on rerun.
+      if (!seoPackage.competitor_urls?.length && brief.allReferences.length > 0) {
+        seoPackage.competitor_urls = brief.allReferences.slice(0, 3).map((r) => ({
+          url: r.url,
+          gap_note: `Seeded from SEO brief (${r.sourceOrg}); verify specific angle gap manually.`,
+        }));
+      }
+    }
+
+    logger.info("seo-researcher", `SEO package ready — ${seoPackage.secondary_keywords.length} secondary keywords, ${seoPackage.suggested_h2_outline.length} H2s${brief ? ", brief merged" : ""}`);
 
     return {
       success: true,
