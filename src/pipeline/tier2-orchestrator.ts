@@ -191,8 +191,11 @@ async function processTopic(topic: TopicCard): Promise<Tier2Result> {
   }
 
   // ── Stage 11: Post to Payload CMS ─────────────────────────────────────
+  // `skipImages: true` — image generation is memory-heavy and OOMs the
+  // Vercel function at Hobby's 2048 MB limit when combined with everything
+  // else this invocation holds. Images are attached in a later invocation.
   addLog("html_formatting", "running", 1);
-  const postResult = await runPayloadPoster(approvedDraft, brief);
+  const postResult = await runPayloadPoster(approvedDraft, brief, [], { skipImages: true });
 
   if (!postResult.success || !postResult.data) {
     addLog("html_formatting", "failed", 1, { error: postResult.error, duration_ms: postResult.duration_ms });

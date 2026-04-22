@@ -345,7 +345,8 @@ function estimateReadTime(markdown: string): number {
 export async function runPayloadPoster(
   draft: BlogDraft,
   brief: ContentBrief,
-  prebuiltImages: ImageInput[] = []
+  prebuiltImages: ImageInput[] = [],
+  options: { skipImages?: boolean } = {},
 ): Promise<AgentResult<{ payloadId: string; adminUrl: string; slug: string }>> {
   const start = Date.now();
 
@@ -380,8 +381,14 @@ export async function runPayloadPoster(
     // Caller-provided images take priority; otherwise we extract IMAGE
     // markers from the blog body and generate them now. Failures are
     // non-fatal — the draft still posts without the failing image.
+    //
+    // `skipImages: true` is used by the Tier 2 serverless chain — image
+    // generation has a memory footprint that OOMs Vercel functions at
+    // the Hobby plan's 2048 MB limit. A separate endpoint
+    // (`/api/pipeline/tier2-images`) attaches images to the draft
+    // in a later invocation.
     let images: ImageInput[] = prebuiltImages;
-    if (images.length === 0) {
+    if (images.length === 0 && !options.skipImages) {
       try {
         const generated: GeneratedImage[] = await runImagePipeline(token, body);
         images = generated.map((g) => ({
@@ -395,6 +402,11 @@ export async function runPayloadPoster(
           `Image pipeline threw: ${err.message} — posting draft without images`,
         );
       }
+    } else if (options.skipImages) {
+      logger.info(
+        "payload-poster",
+        "Skipping inline image generation (skipImages=true) — draft posts without images; run tier2-images to attach them",
+      );
     }
 
     // Build Lexical AFTER images are known so mediaIds slot into the tree.
