@@ -107,6 +107,9 @@ export interface TopicCard {
   refined_at?: string;
   // Set after posting to ClickUp
   clickup_task_id?: string;
+  // Set after Tier 2 has processed this topic (written + posted draft). Used
+  // by the chained tier2-trigger invocations to skip already-processed topics.
+  tier2_processed_at?: string;
 }
 
 // ─── Topic Evaluation ─────────────────────────────────────────────────────────

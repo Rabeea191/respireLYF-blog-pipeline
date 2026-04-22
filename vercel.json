@@ -4,13 +4,18 @@
   "outputDirectory": "dist",
   "functions": {
     "api/pipeline/trigger.ts": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "memory": 2048
     },
     "api/pipeline/clickup-webhook.ts": {
       "maxDuration": 60
     },
     "api/pipeline/tier2-trigger.ts": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "memory": 2048
+    },
+    "api/pipeline/tier2-reset.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [

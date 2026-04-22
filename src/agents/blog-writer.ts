@@ -24,7 +24,10 @@ import { logger } from "../lib/logger";
 import type { TopicCard, SEOPackage, ContentBrief, BlogDraft, AgentResult } from "../types";
 import { randomUUID } from "crypto";
 
-const MAX_ITERATIONS = 3;
+// Vercel 300s budget + memory pressure from multiple Claude responses sitting
+// in heap means we can't afford 3 iterations per blog. One pass, then escalate —
+// orchestrator still runs the gate + posts to Payload with whatever we got.
+const MAX_ITERATIONS = 1;
 const BANNED_WORDS = ["journey", "empower", "transform", "game-changer", "game changer", "revolutionary", "unlock"];
 
 // ─── Word counter (text only, no frontmatter or comments) ──────────────────

@@ -158,9 +158,11 @@ async function uploadToPayloadMedia(
 ): Promise<{ id: string; url?: string }> {
   const form = new FormData();
   form.append("_payload", JSON.stringify({ alt: altText || filename }));
+  // Pass the Buffer directly — Node Buffer extends Uint8Array, so Blob can
+  // wrap it without an extra copy. Avoids a 2x memory spike per image upload.
   form.append(
     "file",
-    new Blob([new Uint8Array(buffer)], { type: "image/png" }),
+    new Blob([buffer], { type: "image/png" }),
     filename,
   );
 
@@ -220,19 +222,29 @@ export async function runImagePipeline(
         "image_pipeline",
         `  ▸ ${filename} (${aspect}) — "${prompt.slice(0, 70)}${prompt.length > 70 ? "…" : ""}"`,
       );
-      const buf = await nanoBananaGenerate(enhanced, aspect);
-      const { id, url } = await uploadToPayloadMedia(
-        token,
-        buf,
-        filename,
-        prompt.slice(0, 120),
-      );
+      // Wrap buffer lifetime in a block so it's eligible for GC ASAP after upload
+      const { id, url } = await (async () => {
+        const buf = await nanoBananaGenerate(enhanced, aspect);
+        const res = await uploadToPayloadMedia(
+          token,
+          buf,
+          filename,
+          prompt.slice(0, 120),
+        );
+        // Buffer goes out of scope here — eligible for GC before next iteration
+        return res;
+      })();
       logger.info("image_pipeline", `  ✓ uploaded → mediaId=${id}${url ? ` (${url})` : ""}`);
       results.push({
         placement,
         mediaId: id,
         alt: prompt.slice(0, 120),
       });
+      // Hint to V8 that we're okay with collecting now — runs only if
+      // `--expose-gc` is passed (set via NODE_OPTIONS on Vercel).
+      if (typeof (globalThis as any).gc === "function") {
+        (globalThis as any).gc();
+      }
     } catch (err: any) {
       logger.warn(
         "image_pipeline",

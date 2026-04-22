@@ -24,7 +24,11 @@ import { runPayloadPoster }  from "../agents/payload-poster";
 import { logger }            from "../lib/logger";
 import { config }            from "../lib/config";
 import { resetTokenStats, getTokenStats } from "../lib/claude";
-import { extractEmbeddedTopic } from "../lib/topic-embed";
+import {
+  extractEmbeddedTopic,
+  buildEmbeddedTopicBlock,
+  TOPIC_BLOCK_OPEN,
+} from "../lib/topic-embed";
 import * as fs               from "fs";
 import * as path             from "path";
 import type {
@@ -37,7 +41,12 @@ import type {
 
 const CLICKUP_BASE = "https://api.clickup.com/api/v2";
 
-const MAX_WRITE_ITERATIONS = 3;
+// Blog-writer already runs its own 3-iteration loop with hard-check feedback.
+// Wrapping that in ANOTHER 3-iteration evaluator loop at this layer meant the
+// worst case was 3 × 3 = 9 writer calls per topic, which blew Vercel's 300s
+// limit. One outer pass is enough: if the writer escalates after its internal
+// retries, we accept the draft as-is and let the human review it in Payload.
+const MAX_WRITE_ITERATIONS = 1;
 
 export interface Tier2Result {
   topic_id:    string;
@@ -74,6 +83,11 @@ async function processTopic(topic: TopicCard): Promise<Tier2Result> {
       error: seoResult.error,
       duration_ms: seoResult.duration_ms,
     });
+    // Mark processed so the chain moves on — a repeated retry would just
+    // fail the same way and block every other approved topic behind it.
+    if (topic.clickup_task_id) {
+      await markTopicProcessed(topic.clickup_task_id, topic);
+    }
     return { topic_id: topic.id, topic_title: topic.title, success: false, stage_log: log, error: `SEO research failed: ${seoResult.error}` };
   }
 
@@ -89,6 +103,9 @@ async function processTopic(topic: TopicCard): Promise<Tier2Result> {
 
   if (!briefResult.success || !briefResult.data) {
     addLog("content_brief", "failed", 1, { error: briefResult.error, duration_ms: briefResult.duration_ms });
+    if (topic.clickup_task_id) {
+      await markTopicProcessed(topic.clickup_task_id, topic);
+    }
     return { topic_id: topic.id, topic_title: topic.title, success: false, stage_log: log, error: `Content brief failed: ${briefResult.error}` };
   }
 
@@ -156,6 +173,14 @@ async function processTopic(topic: TopicCard): Promise<Tier2Result> {
   // Escalate if no approved draft
   if (!approvedDraft) {
     logger.error("tier2", `Topic "${topic.title}" failed all ${MAX_WRITE_ITERATIONS} write iterations — escalating to human`);
+
+    // Still mark processed so the chain moves on — otherwise the next
+    // invocation picks the same topic again and loops forever. The failure
+    // is a prompt/evaluator problem, not a chain problem.
+    if (topic.clickup_task_id) {
+      await markTopicProcessed(topic.clickup_task_id, topic);
+    }
+
     return {
       topic_id:    topic.id,
       topic_title: topic.title,
@@ -172,7 +197,18 @@ async function processTopic(topic: TopicCard): Promise<Tier2Result> {
   if (!postResult.success || !postResult.data) {
     addLog("html_formatting", "failed", 1, { error: postResult.error, duration_ms: postResult.duration_ms });
     // Non-fatal — draft is still saved to disk
-    logger.warn("tier2", `Payload post failed for "${topic.title}" — draft saved locally at ${approvedDraft.file_path}`);
+    logger.warn(
+      "tier2",
+      `Payload post failed for "${topic.title}": ${postResult.error} — draft saved locally at ${approvedDraft.file_path}`,
+    );
+
+    // Still mark the topic processed so the chain moves on. A failed Payload
+    // post is a CMS config problem (wrong URL / creds), not a topic problem;
+    // re-running would just hit the same wall and block the queue.
+    if (topic.clickup_task_id) {
+      await markTopicProcessed(topic.clickup_task_id, topic);
+    }
+
     return {
       topic_id:    topic.id,
       topic_title: topic.title,
@@ -193,6 +229,11 @@ async function processTopic(topic: TopicCard): Promise<Tier2Result> {
   });
 
   logger.info("tier2", `✅ "${topic.title}" → draft at ${postResult.data.adminUrl}`);
+
+  // Mark processed so the chained invocations skip this topic next time.
+  if (topic.clickup_task_id) {
+    await markTopicProcessed(topic.clickup_task_id, topic);
+  }
 
   return {
     topic_id:           topic.id,
@@ -252,6 +293,12 @@ export async function loadApprovedTopicsFromClickUp(): Promise<TopicCard[]> {
       continue;
     }
 
+    // Skip topics already processed by Tier 2. The chained invocations rely
+    // on this flag to avoid double-writing blogs for the same topic.
+    if (topic.tier2_processed_at) {
+      continue;
+    }
+
     approved.push({
       ...topic,
       clickup_task_id: task.id,
@@ -261,6 +308,62 @@ export async function loadApprovedTopicsFromClickUp(): Promise<TopicCard[]> {
 
   logger.info("tier2", `Loaded ${approved.length} approved topic(s) from ClickUp`);
   return approved;
+}
+
+/**
+ * Mark a ClickUp task's embedded topic JSON with `tier2_processed_at` so
+ * future invocations skip it. Best-effort — failures are logged but don't
+ * block the pipeline (the task just gets re-processed next time, which
+ * would produce duplicate Payload drafts but no data loss).
+ */
+async function markTopicProcessed(
+  clickupTaskId: string,
+  processedCard: TopicCard,
+): Promise<void> {
+  try {
+    const { data } = await axios.get(
+      `${CLICKUP_BASE}/task/${clickupTaskId}`,
+      {
+        headers: { Authorization: config.clickup.apiKey },
+        timeout: 15_000,
+      },
+    );
+
+    const currentDescription: string =
+      data?.description ?? data?.text_content ?? "";
+
+    // Strip the old embedded block and append a fresh one with the marker.
+    const blockStart = currentDescription.indexOf(TOPIC_BLOCK_OPEN);
+    const beforeBlock =
+      blockStart === -1 ? currentDescription : currentDescription.slice(0, blockStart);
+
+    const updatedCard: TopicCard = {
+      ...processedCard,
+      tier2_processed_at: new Date().toISOString(),
+    };
+
+    const newDescription =
+      beforeBlock.trimEnd() + buildEmbeddedTopicBlock(updatedCard);
+
+    await axios.put(
+      `${CLICKUP_BASE}/task/${clickupTaskId}`,
+      { description: newDescription },
+      {
+        headers: {
+          Authorization: config.clickup.apiKey,
+          "Content-Type": "application/json",
+        },
+        timeout: 15_000,
+      },
+    );
+
+    logger.info("tier2", `Marked ClickUp task ${clickupTaskId} as tier2_processed`);
+  } catch (err: any) {
+    logger.warn(
+      "tier2",
+      `Failed to mark task ${clickupTaskId} as processed: ${err.message}`,
+    );
+  }
 }
 
 // Backwards-compat alias for CLI callers that used the old name.

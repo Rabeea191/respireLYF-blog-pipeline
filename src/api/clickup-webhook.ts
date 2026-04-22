@@ -68,13 +68,15 @@ interface ClickUpTask {
 }
 
 async function fetchListTasks(): Promise<ClickUpTask[]> {
-  // ClickUp caps at 100 tasks per page — for a weekly 5-topic list we're fine.
+  // ClickUp caps at 100 tasks per page — for a weekly topic list we're fine.
+  // Timeout is generous because ClickUp's API occasionally goes slow and a
+  // 10s budget wasn't enough — if this call fails we can't count approvals.
   const { data } = await axios.get(
     `${CLICKUP_BASE}/list/${config.clickup.listId}/task`,
     {
       headers,
       params: { include_closed: false, subtasks: false, page: 0 },
-      timeout: 15_000,
+      timeout: 30_000,
     }
   );
   return (data?.tasks ?? []) as ClickUpTask[];
@@ -84,7 +86,7 @@ async function fetchTask(taskId: string): Promise<ClickUpTask | null> {
   try {
     const { data } = await axios.get(`${CLICKUP_BASE}/task/${taskId}`, {
       headers,
-      timeout: 10_000,
+      timeout: 30_000,
     });
     return data as ClickUpTask;
   } catch (err: any) {
@@ -206,17 +208,12 @@ async function handleStatusUpdate(
     return;
   }
 
-  // Confirm this is one of our pipeline topic tasks (has embedded JSON)
-  const task = await fetchTask(clickupTaskId);
-  const topic = extractEmbeddedTopic(task?.description ?? task?.text_content ?? "");
-  if (!topic) {
-    logger.debug("clickup_webhook", `Task ${clickupTaskId} has no embedded topic — ignoring`);
-    return;
-  }
-
-  logger.info("clickup_webhook", `Topic "${topic.title}" → Approved`, {
-    data: { clickup_task_id: clickupTaskId },
-  });
+  // Skip the per-task fetch entirely — it was timing out intermittently and
+  // blocking the approval count. `countApprovedPipelineTasks` already fetches
+  // the full list and filters for our embedded-JSON topic tasks, so we can
+  // rely on that as the single source of truth. Worst case, a non-pipeline
+  // task flipped to Approved doesn't count because it has no embedded JSON.
+  logger.info("clickup_webhook", `Task ${clickupTaskId} → Approved — counting approvals`);
 
   const approvedCount = await countApprovedPipelineTasks();
   const threshold = config.pipeline.approvalThreshold;
